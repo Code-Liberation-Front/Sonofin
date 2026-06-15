@@ -4,28 +4,19 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Bookshelf with a play triangle -->
+    <!-- Eighth note centered in the adaptive-icon safe zone -->
     <group>
-        <!-- shelf books -->
+        <!-- stem -->
         <path
             android:fillColor="#FFFFFF"
-            android:pathData="M32,34 h8 v40 h-8 z" />
-        <path
-            android:fillColor="#FFE3C8"
-            android:pathData="M43,30 h8 v44 h-8 z" />
+            android:pathData="M56,30 h4 v42 h-4 z" />
+        <!-- flag -->
         <path
             android:fillColor="#FFFFFF"
-            android:pathData="M54,36 l7.7,-2 10,38.6 -7.7,2 z" />
-        <!-- shelf base -->
+            android:pathData="M60,28 c14,4 17,16 6,26 c5,-11 1,-19 -6,-22 z" />
+        <!-- note head -->
         <path
             android:fillColor="#FFFFFF"
-            android:pathData="M28,76 h52 v5 h-52 z" />
-        <!-- play badge -->
-        <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M66,18 m-12,0 a12,12 0 1,1 24,0 a12,12 0 1,1 -24,0" />
-        <path
-            android:fillColor="#FC7E0F"
-            android:pathData="M62,12 l10,6 -10,6 z" />
+            android:pathData="M46,72 m-13,0 a13,13 0 1,0 26,0 a13,13 0 1,0 -26,0 z" />
     </group>
 </vector>
