@@ -232,7 +232,7 @@ fun PlaylistScreen(
                 TextButton(onClick = { addingToPlaylist = selectedPlaylist.id }) {
                     Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Add episodes")
+                    Text("Add songs")
                 }
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { app.playlist.delete(selectedPlaylist.id) }) {
@@ -249,9 +249,9 @@ fun PlaylistScreen(
             Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                 Text(
                     if (selectedId == DOWNLOADED_PLAYLIST_ID) {
-                        "No downloaded episodes yet. Downloads appear here automatically for offline listening."
+                        "No downloaded songs yet. Downloads appear here automatically for offline listening."
                     } else {
-                        "This playlist is empty. Tap \"Add episodes\" to search your library, or use the playlist button on any episode."
+                        "This playlist is empty. Tap \"Add songs\" to search your library, or use the playlist button on any song."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -560,7 +560,7 @@ private fun AddEpisodesPane(
                     app.repository.coverUrl(podcast.id) to PlaylistEntry(
                         itemId = podcast.id,
                         episodeId = episode.id,
-                        title = episode.title ?: "Episode",
+                        title = episode.title ?: "Song",
                         podcastTitle = podcast.media.metadata.title ?: "",
                     )
                 }
@@ -575,7 +575,7 @@ private fun AddEpisodesPane(
                                 app.repository.coverUrl(podcast.id) to PlaylistEntry(
                                     itemId = podcast.id,
                                     episodeId = episode.id,
-                                    title = episode.title ?: "Episode",
+                                    title = episode.title ?: "Song",
                                     podcastTitle = podcast.media.metadata.title ?: "",
                                 )
                             }
@@ -606,7 +606,7 @@ private fun AddEpisodesPane(
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text("Search podcasts and episodes") },
+            placeholder = { Text("Search albums and songs") },
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()

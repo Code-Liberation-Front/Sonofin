@@ -58,9 +58,9 @@ fun LoginScreen(app: ShelfieApp, externalError: String? = null) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("Shelfie", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
+        Text("Sonofin", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
         Text(
-            "Connect to your Audiobookshelf server",
+            "Connect to your Jellyfin music server",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -75,7 +75,7 @@ fun LoginScreen(app: ShelfieApp, externalError: String? = null) {
                 value = server,
                 onValueChange = { server = it },
                 label = { Text("Server URL") },
-                placeholder = { Text("https://abs.example.com") },
+                placeholder = { Text("https://jellyfin.example.com") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.None,

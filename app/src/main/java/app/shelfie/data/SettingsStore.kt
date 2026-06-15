@@ -30,6 +30,7 @@ class SettingsStore(private val context: Context) {
         val userId = stringPreferencesKey("user_id")
         val username = stringPreferencesKey("username")
         val libraryId = stringPreferencesKey("library_id")
+        val deviceId = stringPreferencesKey("device_id")
         val pendingOidcServer = stringPreferencesKey("pending_oidc_server")
         val pendingOidcVerifier = stringPreferencesKey("pending_oidc_verifier")
         val pendingOidcCookies = stringPreferencesKey("pending_oidc_cookies")
@@ -90,6 +91,15 @@ class SettingsStore(private val context: Context) {
     }
 
     suspend fun snapshot(): Credentials = credentials.first()
+
+    /** A stable per-install device id for the Jellyfin auth header; generated once. */
+    suspend fun deviceId(): String {
+        val existing = context.dataStore.data.first()[Keys.deviceId]
+        if (!existing.isNullOrBlank()) return existing
+        val generated = java.util.UUID.randomUUID().toString().replace("-", "")
+        context.dataStore.edit { it[Keys.deviceId] = generated }
+        return generated
+    }
 
     suspend fun saveLogin(serverUrl: String, token: String, userId: String, username: String) {
         context.dataStore.edit { prefs ->

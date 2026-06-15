@@ -129,10 +129,10 @@ private fun HomeContent(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 12.dp),
             ) {
-                item { SectionTitle("Continue Listening") }
+                item { SectionTitle("Recently Played") }
                 item {
                     if (state.inProgress.isEmpty()) {
-                        EmptyHint("Nothing in progress yet — pick an episode and start listening.")
+                        EmptyHint("Nothing played yet — pick an album and start listening.")
                     } else {
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -162,7 +162,7 @@ private fun HomeContent(
                                             pickerEntry = PlaylistEntry(
                                                 itemId = itemId,
                                                 episodeId = episodeId,
-                                                title = entry.episode.title ?: "Episode",
+                                                title = entry.episode.title ?: "Song",
                                                 podcastTitle = entry.podcast.media.metadata.title ?: "",
                                             )
                                         },
@@ -180,7 +180,7 @@ private fun HomeContent(
                 item { SectionTitle("Recently Added") }
                 item {
                     if (state.recentlyAdded.isEmpty()) {
-                        EmptyHint("No podcasts in this library yet.")
+                        EmptyHint("No albums in this library yet.")
                     } else {
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -253,7 +253,7 @@ private fun ContinueCard(
             )
         }
         Text(
-            entry.episode.title ?: "Episode",
+            entry.episode.title ?: "Song",
             style = MaterialTheme.typography.titleSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -303,7 +303,7 @@ private fun RecentPodcastCard(
                 .clip(RoundedCornerShape(10.dp)),
         )
         Text(
-            podcast.media.metadata.title ?: "Podcast",
+            podcast.media.metadata.title ?: "Album",
             style = MaterialTheme.typography.titleSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,

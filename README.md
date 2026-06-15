@@ -1,72 +1,57 @@
-# Shelfie
+# Sonofin
 
-A better podcast client for [Audiobookshelf](https://www.audiobookshelf.org/) on Android, inspired by Overcast on iOS — with full **Android Auto** support.
+A fast, focused **Jellyfin music client** for Android, with full **Android Auto** support.
 
 [![Build APK](../../actions/workflows/build.yml/badge.svg)](../../actions/workflows/build.yml)
 
+Sonofin connects to your self-hosted [Jellyfin](https://jellyfin.org/) server and turns your music library into a clean listening app.
+
 ## What it does
 
-Shelfie connects to your self-hosted Audiobookshelf server and turns your podcast library into a fast, focused listening app:
-
-- **Sign in to your server** — works with any Audiobookshelf instance (HTTPS or HTTP); supports both username/password and **OIDC single sign-on** (enter the server URL first, then pick whichever method your server offers)
-- **Home / Latest / Library tabs** — Home shows Continue Listening and Recently Added shelves; Latest lists the newest episodes across your whole library; Library is the full cover-art grid
-- **Search** — find podcasts and episodes by name from the top bar
+- **Sign in to your server** — works with any Jellyfin instance (HTTPS or HTTP) using your username and password
+- **Home / Latest / Library tabs** — Home shows Recently Played and Recently Added shelves; Latest lists the newest tracks added across your library; Library is the full album cover-art grid
+- **Search** — find albums and songs by name from the top bar
 - **Chromecast** — cast playback to a TV or speaker from the cast button in the top bar
-- **Settings** — view your account and listening stats, switch servers/users, and switch between podcast libraries on the server
-- **Downloads & offline** — download episodes for offline listening (with live progress and speed in Settings → Downloads); the library, episode lists, and listening progress are cached so the app works without a connection and plays downloaded episodes
-- **Browse your podcast library** — cover-art grid, episode lists with publish dates and durations
-- **Stream episodes** with background playback, media notification, lockscreen/Bluetooth controls
-- **Android Auto** — browse podcasts and episodes and control playback from your car
+- **Settings** — view your account, switch servers/users, and switch between music libraries on the server
+- **Downloads & offline** — download tracks for offline listening (with live progress and speed in Settings → Downloads); the library, album track lists, and play state are cached so the app works without a connection and plays downloaded songs
+- **Browse your music library** — album cover-art grid, track lists with track numbers and durations
+- **Stream tracks** with background playback, media notification, lockscreen/Bluetooth controls
+- **Android Auto** — browse albums and songs and control playback from your car
 - **Playback speed** from 0.75x to 3x
-- **Overcast-style skips** — 30s forward, 10s back
-- **Progress sync** — listening position is saved back to Audiobookshelf every few seconds and resumes on any device, picking up exactly where you left off
+- **Skip controls** — 30s forward, 10s back
+- **Play-state sync** — played tracks are marked back to Jellyfin so your "played" badges and Recently Played stay in sync across devices
 
 ## Download
 
 Grab the APK one of two ways:
 
-1. **Releases** — each [release](../../releases) is built from a version tag (`vX.Y.Z`) and carries `shelfie-debug.apk` (sideload) and `shelfie-release.aab` (Google Play). Grab the newest one.
-2. **Actions artifacts** — any manual CI run on the [Actions tab](../../actions) uploads `shelfie-debug-apk` and `shelfie-release-aab` artifacts.
+1. **Releases** — each [release](../../releases) is built from a version tag (`vX.Y.Z`). Grab the newest one.
+2. **Actions artifacts** — any manual CI run on the [Actions tab](../../actions) uploads the debug APK and release AAB artifacts.
 
 Sideload it by enabling *Install unknown apps* for your browser/file manager, then opening the APK.
 
-> All CI builds are signed with a shared key committed to the repo, so newer APKs install directly over older ones. If you installed a build from before this key existed (≤ v0.8.1), uninstall once — after that, updates apply in place.
+> All CI builds are signed with a shared key committed to the repo, so newer APKs install directly over older ones.
 
 ## Android Auto
 
-Shelfie ships a Media3 `MediaLibraryService`, so it appears as a media app in Android Auto automatically once installed and signed in. In the car you get:
+Sonofin ships a Media3 `MediaLibraryService`, so it appears as a media app in Android Auto automatically once installed and signed in. In the car you get:
 
-- **Continue Listening** tab — episodes you've started, one tap to resume from where you left off
-- **Podcasts** tab — your library as a cover grid, episodes as lists with played/in-progress badges
-- **Full-podcast queueing** — playing an episode queues the rest of the show so next/previous track buttons work
-- **Search** — both the browse search UI and voice ("play *<podcast>* on Shelfie")
-- **Resume** — Auto's resume card restores your last episode and position even after the app was killed
+- **Recently Played** tab — tracks you've played recently, one tap to play
+- **Albums** tab — your library as a cover grid, tracks as lists
+- **Full-album queueing** — playing a track queues the rest of the album so next/previous track buttons work
+- **Search** — both the browse search UI and voice ("play *<album>* on Sonofin")
+- **Resume** — Auto's resume card restores your last track even after the app was killed
 
-Because sideloaded apps are hidden by default, enable developer mode in the Android Auto settings on your phone and check **"Unknown sources"**, then Shelfie will show up on the car launcher.
+Because sideloaded apps are hidden by default, enable developer mode in the Android Auto settings on your phone and check **"Unknown sources"**, then Sonofin will show up on the car launcher.
 
-## OIDC / single sign-on setup
+## Connecting to Jellyfin
 
-Shelfie signs in through Audiobookshelf's mobile OAuth flow using the redirect URI `audiobookshelf://oauth`.
+1. Enter your server URL (e.g. `https://jellyfin.example.com`). If you omit the scheme, `https://` is assumed.
+2. Enter your Jellyfin **username** and **password**.
 
-**Getting HTTP 400 in the browser when you tap the SSO button?** The server is rejecting that redirect URI. In the Audiobookshelf web UI go to **Settings → Authentication → OpenID Connect Auth** and check **Allowed Mobile Redirect URIs**:
+Sonofin authenticates through Jellyfin's `Users/AuthenticateByName` endpoint and stores the returned access token. Each install generates a stable device id so the session shows up in Jellyfin's **Dashboard → Devices** as the "Sonofin" client.
 
-- it must contain `audiobookshelf://oauth` (this is the server default, but it disappears if the list was ever edited for another app), **or**
-- set it to `*` to allow any mobile redirect URI.
-
-Save the setting and try again — no app changes needed. Multiple entries are supported, so you can keep URIs for other apps (e.g. the official app or ShelfPlayer) alongside Shelfie's.
-
-## Google Play (internal testing)
-
-Every CI run also produces `shelfie-release.aab`, a Play-ready Android App Bundle (minified release build). To distribute through the Play Console:
-
-1. In the [Play Console](https://play.google.com/console) choose **Create app** (name *Shelfie*, App, Free).
-2. Go to **Testing → Internal testing → Create new release**.
-3. Accept **Play App Signing** when prompted (Google holds the final signing key; the AAB is signed with our upload key).
-4. Upload `shelfie-release.aab` from the newest tagged release or a manual CI run.
-5. Add tester email addresses under the **Testers** tab, save, and share the opt-in link — testers install/update through Play like any app.
-6. Each new upload needs a higher `versionCode` (bumped with each release in this repo).
-
-By default the AAB is signed with the repo's shared keystore as the upload key. To use a private upload key instead, add repository secrets `UPLOAD_KEYSTORE_BASE64` (base64 of the keystore), `UPLOAD_KEYSTORE_PASSWORD`, `UPLOAD_KEY_ALIAS`, and `UPLOAD_KEY_PASSWORD` — CI switches to it automatically. If the upload key ever needs replacing, Play App Signing supports an upload-key reset.
+If you have more than one music library, switch between them in **Settings**.
 
 ## Building locally
 
@@ -79,18 +64,12 @@ Requirements: JDK 17+ and the Android SDK (API 35).
 
 ## Architecture
 
-- **Kotlin + Jetpack Compose** (Material 3, dark Overcast-style theme)
+- **Kotlin + Jetpack Compose** (Material 3, dark theme)
 - **Media3 / ExoPlayer** for playback; a single `MediaLibraryService` powers the app UI, the media notification, and Android Auto
-- **Retrofit + kotlinx.serialization** client for the Audiobookshelf REST API (`/login`, `/api/libraries`, `/api/items`, `/api/me/progress`)
-- **DataStore** for server credentials
+- **Retrofit + kotlinx.serialization** client for the Jellyfin REST API (`/Users/AuthenticateByName`, `/Users/{id}/Views`, `/Items`, `/Audio/{id}/stream`, `/Sessions/Playing/Progress`)
+- **DataStore** for server credentials and the device id
 
-## Roadmap
-
-- Smart Speed–style silence trimming and Voice Boost
-- Episode downloads for offline listening
-- Playlists / queue management
-- Multiple library support and library switching
-- Search
+> Internal package and class names still use the `shelfie` prefix — Sonofin started life as a fork of the Shelfie Audiobookshelf client, and keeping the package id (`com.shelfie.zbuddy`) preserves in-place updates for existing installs. The app maps Jellyfin's albums/tracks onto the older "podcast/episode" type names in the data layer; everything the user sees is music terminology.
 
 ## License
 

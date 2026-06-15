@@ -102,7 +102,7 @@ fun EpisodesScreen(
                     }
                 EpisodesUi.Ready(podcast, rows)
             } catch (e: Exception) {
-                EpisodesUi.Error(e.message ?: "Failed to load episodes")
+                EpisodesUi.Error(e.message ?: "Failed to load album")
             }
         }
     }
@@ -146,7 +146,7 @@ fun EpisodesScreen(
                         PlaylistEntry(
                             itemId = itemId,
                             episodeId = ep.id,
-                            title = ep.title ?: "Episode",
+                            title = ep.title ?: "Song",
                             podcastTitle = state.podcast.media.metadata.title ?: "",
                         )
                     },
@@ -240,7 +240,7 @@ fun EpisodesScreen(
                                 pickerEntry = PlaylistEntry(
                                     itemId = itemId,
                                     episodeId = row.episode.id,
-                                    title = row.episode.title ?: "Episode",
+                                    title = row.episode.title ?: "Song",
                                     podcastTitle = state.podcast.media.metadata.title ?: "",
                                 )
                             },
@@ -290,7 +290,7 @@ private fun PodcastHeader(podcast: LibraryItemExpanded, coverUrl: String, onBack
             )
             Column(Modifier.padding(start = 16.dp)) {
                 Text(
-                    podcast.media.metadata.title ?: "Podcast",
+                    podcast.media.metadata.title ?: "Album",
                     style = MaterialTheme.typography.titleLarge,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
@@ -303,7 +303,7 @@ private fun PodcastHeader(podcast: LibraryItemExpanded, coverUrl: String, onBack
                     )
                 }
                 val countText = when {
-                    podcast.media.episodes.isNotEmpty() -> "${podcast.media.episodes.size} episodes"
+                    podcast.media.episodes.isNotEmpty() -> "${podcast.media.episodes.size} songs"
                     podcast.media.tracks.isNotEmpty() -> "${podcast.media.tracks.size} parts"
                     else -> ""
                 }
@@ -398,7 +398,7 @@ private fun EpisodeRow(
             }
             EpisodeRowContent(
                 coverUrl = coverUrl,
-                title = episode.title ?: "Episode",
+                title = episode.title ?: "Song",
                 subtitle = null,
                 dateLine = dateLine,
                 progressFraction = row.progressFraction,

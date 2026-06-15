@@ -337,7 +337,7 @@ class PlaybackService : MediaLibraryService() {
                 .setMediaId(ROOT_ID)
                 .setMediaMetadata(
                     MediaMetadata.Builder()
-                        .setTitle("Shelfie")
+                        .setTitle("Sonofin")
                         .setIsBrowsable(true)
                         .setIsPlayable(false)
                         .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
@@ -527,12 +527,12 @@ class PlaybackService : MediaLibraryService() {
     private fun rootTabs(): List<MediaItem> = listOf(
         folderItem(
             id = CONTINUE_ID,
-            title = "Continue Listening",
+            title = "Recently Played",
             extras = Bundle().apply { putInt(EXTRA_STYLE_PLAYABLE, STYLE_LIST) },
         ),
         folderItem(
             id = PODCASTS_ID,
-            title = "Podcasts",
+            title = "Albums",
             extras = Bundle().apply { putInt(EXTRA_STYLE_BROWSABLE, STYLE_GRID) },
         ),
     )
@@ -777,7 +777,7 @@ class PlaybackService : MediaLibraryService() {
             .setMediaId("$PODCAST_PREFIX$id")
             .setMediaMetadata(
                 MediaMetadata.Builder()
-                    .setTitle(media.metadata.title ?: "Podcast")
+                    .setTitle(media.metadata.title ?: "Album")
                     .setArtist(media.metadata.author)
                     .setArtworkUri(Uri.parse(repo.coverUrl(id)))
                     .setIsBrowsable(true)
@@ -810,7 +810,7 @@ class PlaybackService : MediaLibraryService() {
         episode.publishedAt?.let { extras.putLong(EXTRA_PUBLISHED_AT, it) }
         episode.pubDate?.let { extras.putString(EXTRA_PUB_DATE, it) }
         val metadata = MediaMetadata.Builder()
-            .setTitle(episode.title ?: "Episode")
+            .setTitle(episode.title ?: "Song")
             .setArtist(podcast.media.metadata.title)
             .setAlbumTitle(podcast.media.metadata.title)
             .setArtworkUri(Uri.parse(repo.coverUrl(podcast.id)))

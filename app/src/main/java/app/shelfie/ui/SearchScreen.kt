@@ -106,7 +106,7 @@ fun SearchScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Search podcasts and episodes") },
+                placeholder = { Text("Search albums and songs") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
@@ -142,10 +142,10 @@ fun SearchScreen(
                 val found = results ?: return@Column
                 LazyColumn(Modifier.fillMaxSize()) {
                     if (found.podcasts.isNotEmpty()) {
-                        item { SearchSectionTitle("Podcasts") }
+                        item { SearchSectionTitle("Albums") }
                         items(found.podcasts, key = { "p:${it.id}" }) { podcast ->
                             PodcastResultRow(
-                                title = podcast.media.metadata.title ?: "Podcast",
+                                title = podcast.media.metadata.title ?: "Album",
                                 author = podcast.media.metadata.author ?: "",
                                 coverUrl = app.repository.coverUrl(podcast.id),
                                 onClick = { onOpenPodcast(podcast.id) },
@@ -153,7 +153,7 @@ fun SearchScreen(
                         }
                     }
                     if (found.episodes.isNotEmpty()) {
-                        item { SearchSectionTitle("Episodes") }
+                        item { SearchSectionTitle("Songs") }
                         items(found.episodes, key = { "e:${it.second.id}" }) { (podcast, episode) ->
                             val itemId = podcast.id
                             val durationSec = (episode.audioTrack?.duration ?: episode.audioFile?.duration ?: 0.0)
@@ -178,7 +178,7 @@ fun SearchScreen(
                                         pickerEntry = PlaylistEntry(
                                             itemId = itemId,
                                             episodeId = episode.id,
-                                            title = episode.title ?: "Episode",
+                                            title = episode.title ?: "Song",
                                             podcastTitle = podcast.media.metadata.title ?: "",
                                         )
                                     },
@@ -269,7 +269,7 @@ private fun EpisodeResultRow(
         ) {
             EpisodeRowContent(
                 coverUrl = coverUrl,
-                title = episode.title ?: "Episode",
+                title = episode.title ?: "Song",
                 subtitle = podcastTitle,
                 dateLine = dateLine,
                 progressFraction = 0f,

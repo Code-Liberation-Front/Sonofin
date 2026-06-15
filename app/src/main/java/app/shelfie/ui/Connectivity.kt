@@ -111,7 +111,7 @@ fun OfflineTabHint() {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "Your downloaded episodes are ready to play.\nGo to Playlist → Downloaded.",
+            "Your downloaded songs are ready to play.\nGo to Playlist → Downloaded.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

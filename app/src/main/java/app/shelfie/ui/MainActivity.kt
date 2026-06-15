@@ -2,7 +2,6 @@ package app.shelfie.ui
 
 import android.Manifest
 import android.content.ComponentName
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -55,7 +54,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.navigation.compose.NavHost
@@ -68,7 +66,6 @@ import app.shelfie.playback.PlaybackService
 import app.shelfie.ui.theme.ShelfieTheme
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
-import kotlinx.coroutines.launch
 
 // AppCompatActivity (a FragmentActivity) is required for the Cast chooser dialog.
 class MainActivity : AppCompatActivity() {
@@ -89,43 +86,6 @@ class MainActivity : AppCompatActivity() {
                 val controller by controllerState
                 val error by loginError
                 ShelfieRoot(app = app, controller = controller, loginError = error)
-            }
-        }
-        handleOidcIntent(intent)
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleOidcIntent(intent)
-    }
-
-    /** Finishes the OIDC login when the browser redirects back to audiobookshelf://oauth. */
-    private fun handleOidcIntent(intent: Intent?) {
-        val data = intent?.data ?: return
-        if (data.scheme != "audiobookshelf" || data.host != "oauth") return
-        val code = data.getQueryParameter("code")
-        val state = data.getQueryParameter("state")
-        if (code.isNullOrBlank() || state.isNullOrBlank()) {
-            loginError.value = "Sign-in was cancelled or the server returned no code."
-            return
-        }
-        loginError.value = null
-        val app = application as ShelfieApp
-        lifecycleScope.launch {
-            try {
-                app.repository.completeOidcLogin(code, state)
-            } catch (e: Exception) {
-                loginError.value = if (e is retrofit2.HttpException && e.code() == 400) {
-                    val serverMessage = runCatching {
-                        e.response()?.errorBody()?.string()?.take(200)?.trim()
-                    }.getOrNull().orEmpty()
-                    val detail = if (serverMessage.isNotBlank()) " — $serverMessage" else ""
-                    "Sign-in rejected by the server (HTTP 400$detail). If this mentions the " +
-                        "redirect URI, add audiobookshelf://oauth to \"Allowed Mobile Redirect " +
-                        "URIs\" in Audiobookshelf Settings → Authentication."
-                } else {
-                    e.message ?: "OIDC sign-in failed"
-                }
             }
         }
     }
@@ -380,14 +340,14 @@ private fun ShelfieTopBar(onSearch: () -> Unit, onSettings: () -> Unit) {
     ) {
         Image(
             painter = painterResource(R.drawable.ic_launcher_foreground),
-            contentDescription = "Shelfie",
+            contentDescription = "Sonofin",
             modifier = Modifier
                 .size(38.dp)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primary),
         )
         Text(
-            "Shelfie",
+            "Sonofin",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 10.dp),

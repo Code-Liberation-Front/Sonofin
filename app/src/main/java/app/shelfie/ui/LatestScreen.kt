@@ -97,7 +97,7 @@ fun LatestScreen(
                     LatestUi.Ready(episodes, titles, progress)
                 }
             } catch (e: Exception) {
-                LatestUi.Error(e.message ?: "Failed to load latest episodes")
+                LatestUi.Error(e.message ?: "Failed to load recent songs")
             }
         }
         isRefreshing = false
@@ -161,7 +161,7 @@ private fun LatestContent(
                         PlaylistEntry(
                             itemId = ep.libraryItemId,
                             episodeId = ep.id,
-                            title = ep.title ?: "Episode",
+                            title = ep.title ?: "Song",
                             podcastTitle = state.podcastTitles[ep.libraryItemId] ?: "",
                         )
                     },
@@ -233,7 +233,7 @@ private fun LatestContent(
                                     pickerEntry = PlaylistEntry(
                                         itemId = episode.libraryItemId,
                                         episodeId = episode.id,
-                                        title = episode.title ?: "Episode",
+                                        title = episode.title ?: "Song",
                                         podcastTitle = podcastTitle,
                                     )
                                 },
@@ -297,7 +297,7 @@ private fun LatestEpisodeRow(
             }
             EpisodeRowContent(
                 coverUrl = coverUrl,
-                title = episode.title ?: "Episode",
+                title = episode.title ?: "Song",
                 subtitle = podcastTitle,
                 dateLine = dateLine,
                 progressFraction = progress?.fraction ?: 0f,

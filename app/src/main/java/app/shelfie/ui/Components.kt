@@ -250,7 +250,7 @@ fun EpisodeLongPressBox(
             )
             actions.onGoToPodcast?.let { goToPodcast ->
                 DropdownMenuItem(
-                    text = { Text("Go to podcast") },
+                    text = { Text("Go to album") },
                     leadingIcon = { Icon(Icons.Filled.Podcasts, contentDescription = null) },
                     onClick = {
                         menuOpen = false

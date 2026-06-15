@@ -49,7 +49,7 @@ fun DownloadsScreen(app: ShelfieApp, onBack: () -> Unit) {
 
         if (active.isEmpty() && completed.isEmpty()) {
             Text(
-                "No downloads yet. Use the download button on any episode to save it for offline listening.",
+                "No downloads yet. Use the download button on any song to save it for offline listening.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
@@ -79,7 +79,7 @@ fun DownloadsScreen(app: ShelfieApp, onBack: () -> Unit) {
                 item {
                     val total = completed.sumOf { it.sizeBytes }
                     Text(
-                        "Downloaded • ${completed.size} episodes • ${formatBytes(total)}",
+                        "Downloaded • ${completed.size} songs • ${formatBytes(total)}",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),

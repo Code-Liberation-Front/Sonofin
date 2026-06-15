@@ -167,7 +167,7 @@ fun SettingsScreen(app: ShelfieApp, onOpenDownloads: () -> Unit, onBack: () -> U
                 Column(Modifier.weight(1f)) {
                     Text("Auto play", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "Continue to the next episode automatically",
+                        "Continue to the next track automatically",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -366,7 +366,7 @@ fun SettingsScreen(app: ShelfieApp, onOpenDownloads: () -> Unit, onBack: () -> U
                 if (activeDownloads.isNotEmpty()) {
                     append(" • ${activeDownloads.size} in progress")
                 } else if (downloads.isNotEmpty()) {
-                    append(" • ${downloads.size} episodes (${formatBytes(downloads.sumOf { it.sizeBytes })})")
+                    append(" • ${downloads.size} tracks (${formatBytes(downloads.sumOf { it.sizeBytes })})")
                 }
             }
             Text(label)
@@ -386,7 +386,7 @@ fun SettingsScreen(app: ShelfieApp, onOpenDownloads: () -> Unit, onBack: () -> U
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Text("Open Audiobookshelf in browser")
+            Text("Open Jellyfin in browser")
         }
 
         OutlinedButton(
@@ -411,6 +411,7 @@ fun SettingsScreen(app: ShelfieApp, onOpenDownloads: () -> Unit, onBack: () -> U
 }
 
 private fun libraryTypeLabel(mediaType: String): String = when (mediaType) {
+    "music" -> "Music"
     "podcast" -> "Podcasts"
     "book" -> "Audiobooks"
     else -> mediaType.replaceFirstChar { it.uppercase() }

@@ -57,7 +57,7 @@ fun PodcastsScreen(app: ShelfieApp, onOpenPodcast: (String) -> Unit) {
                     PodcastsUi.Ready(app.repository.podcasts(forceRefresh = refreshKey > 0))
                 }
             } catch (e: Exception) {
-                PodcastsUi.Error(e.message ?: "Failed to load podcasts")
+                PodcastsUi.Error(e.message ?: "Failed to load albums")
             }
         }
         isRefreshing = false
@@ -135,7 +135,7 @@ private fun PodcastCard(podcast: LibraryItemSummary, coverUrl: String, onClick: 
                 .clip(RoundedCornerShape(10.dp)),
         )
         Text(
-            text = podcast.media.metadata.title ?: "Podcast",
+            text = podcast.media.metadata.title ?: "Album",
             style = MaterialTheme.typography.titleSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -143,7 +143,7 @@ private fun PodcastCard(podcast: LibraryItemSummary, coverUrl: String, onClick: 
         )
         if (podcast.media.numEpisodes > 0) {
             Text(
-                text = "${podcast.media.numEpisodes} episodes",
+                text = "${podcast.media.numEpisodes} tracks",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
