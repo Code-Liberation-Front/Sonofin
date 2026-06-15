@@ -344,7 +344,7 @@ private fun ShelfieTopBar(onSearch: () -> Unit, onSettings: () -> Unit) {
             modifier = Modifier
                 .size(38.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary),
+                .background(androidx.compose.ui.graphics.Color.White),
         )
         Text(
             "Sonofin",
