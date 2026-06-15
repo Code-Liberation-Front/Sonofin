@@ -487,7 +487,7 @@ class AbsRepository(
     }
 
     companion object {
-        private const val CLIENT_VERSION = "0.9.2"
+        private const val CLIENT_VERSION = "0.1.0"
 
         private fun ticksToSec(ticks: Long?): Double = (ticks ?: 0L) / 10_000_000.0
 
