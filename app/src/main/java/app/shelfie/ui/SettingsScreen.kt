@@ -48,7 +48,7 @@ import androidx.core.content.ContextCompat
 import app.shelfie.ShelfieApp
 import app.shelfie.data.Library
 import app.shelfie.data.ListeningStats
-import app.shelfie.ui.theme.ShelfieSurfaceHigh
+import app.shelfie.ui.theme.SonofinSurfaceHigh
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -420,7 +420,7 @@ private fun libraryTypeLabel(mediaType: String): String = when (mediaType) {
 @Composable
 private fun SettingsCard(title: String, content: @Composable () -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = ShelfieSurfaceHigh),
+        colors = CardDefaults.cardColors(containerColor = SonofinSurfaceHigh),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),

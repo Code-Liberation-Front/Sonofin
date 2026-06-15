@@ -60,7 +60,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.media3.session.MediaController
-import app.shelfie.ui.theme.ShelfieSurface
+import app.shelfie.ui.theme.SonofinSurface
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -307,7 +307,7 @@ fun NowPlayingBar(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .background(ShelfieSurface)
+            .background(SonofinSurface)
             .clickable(onClick = onExpand)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {

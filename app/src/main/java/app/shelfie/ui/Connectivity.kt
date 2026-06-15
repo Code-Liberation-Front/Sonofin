@@ -33,7 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import app.shelfie.ui.theme.ShelfieSurfaceHigh
+import app.shelfie.ui.theme.SonofinSurfaceHigh
 
 private fun ConnectivityManager.isOnlineNow(): Boolean {
     val caps = getNetworkCapabilities(activeNetwork) ?: return false
@@ -127,7 +127,7 @@ fun OfflineBanner(padStatusBar: Boolean) {
         modifier = Modifier
             .fillMaxWidth()
             .then(if (padStatusBar) Modifier.statusBarsPadding() else Modifier)
-            .background(ShelfieSurfaceHigh)
+            .background(SonofinSurfaceHigh)
             .padding(vertical = 4.dp),
     ) {
         Icon(
