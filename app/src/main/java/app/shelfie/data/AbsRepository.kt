@@ -101,13 +101,14 @@ class AbsRepository(
         return ServerStatus(isInit = true, authMethods = listOf("local"))
     }
 
-    /** Jellyfin uses username/password (or Quick Connect); SSO is not wired up. */
-    suspend fun startOidcLogin(serverInput: String): String =
+    /**
+     * Jellyfin uses username/password (or Quick Connect); SSO is not wired up.
+     * Retained because the LoginScreen SSO branch still references it (that
+     * branch never renders, since [serverStatus] reports no OpenID support).
+     */
+    suspend fun startOidcLogin(serverInput: String): String {
         throw UnsupportedOperationException("Single sign-on is not supported")
-
-    /** Unused: kept for the deep-link handler. Jellyfin has no browser OIDC flow here. */
-    suspend fun completeOidcLogin(code: String, state: String) =
-        throw UnsupportedOperationException("Single sign-on is not supported")
+    }
 
     suspend fun login(serverInput: String, username: String, password: String) {
         val server = normalizeServerUrl(serverInput)
