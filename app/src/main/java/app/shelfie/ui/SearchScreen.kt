@@ -148,8 +148,7 @@ fun SearchScreen(
                 )
             }
 
-            results != null -> {
-                val found = results ?: return@Column
+            else -> results?.let { found ->
                 LazyColumn(Modifier.fillMaxSize()) {
                     if (found.podcasts.isNotEmpty()) {
                         item { SearchSectionTitle("Albums") }
