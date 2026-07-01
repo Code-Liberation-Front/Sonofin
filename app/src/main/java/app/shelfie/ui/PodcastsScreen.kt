@@ -5,6 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,7 +50,11 @@ private sealed interface PodcastsUi {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PodcastsScreen(app: ShelfieApp, onOpenPodcast: (String) -> Unit) {
+fun PodcastsScreen(
+    app: ShelfieApp,
+    onOpenPodcast: (String) -> Unit,
+    onBack: (() -> Unit)? = null,
+) {
     var refreshKey by remember { mutableIntStateOf(0) }
     var isRefreshing by remember { mutableStateOf(false) }
     val ui by produceState<PodcastsUi>(initialValue = PodcastsUi.Loading, refreshKey) {
@@ -63,15 +72,34 @@ fun PodcastsScreen(app: ShelfieApp, onOpenPodcast: (String) -> Unit) {
         isRefreshing = false
     }
 
-    PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = {
-            isRefreshing = true
-            refreshKey++
-        },
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        PodcastsContent(app, onOpenPodcast, ui, onRetry = { refreshKey++ })
+    Column(Modifier.fillMaxSize()) {
+        if (onBack != null) {
+            Row(
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            }
+            Text(
+                "Albums",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                isRefreshing = true
+                refreshKey++
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            PodcastsContent(app, onOpenPodcast, ui, onRetry = { refreshKey++ })
+        }
     }
 }
 

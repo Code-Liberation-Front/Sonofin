@@ -57,6 +57,7 @@ fun SearchScreen(
     controller: MediaController?,
     onOpenPodcast: (String) -> Unit,
     onBack: () -> Unit,
+    showBack: Boolean = true,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
@@ -65,6 +66,7 @@ fun SearchScreen(
     val scope = rememberCoroutineScope()
     val completedDownloads by app.downloads.completed.collectAsState()
     val activeDownloads by app.downloads.active.collectAsState()
+    val pins by app.pins.pins.collectAsState()
     var pickerEntry by remember { mutableStateOf<PlaylistEntry?>(null) }
 
     pickerEntry?.let { entry ->
@@ -100,8 +102,10 @@ fun SearchScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 8.dp),
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            if (showBack) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
             }
             OutlinedTextField(
                 value = query,
@@ -168,6 +172,15 @@ fun SearchScreen(
                                 actions = EpisodeMenuActions(
                                     isFinished = false,
                                     isDownloaded = isDownloaded,
+                                    isPinned = isSongPinned(pins, itemId, episode.id),
+                                    onPlayNext = { controller?.playNext(itemId, episode.id) },
+                                    onTogglePin = {
+                                        togglePinnedSong(
+                                            app, itemId, episode.id,
+                                            title = episode.title ?: "Song",
+                                            subtitle = podcast.media.metadata.title.orEmpty(),
+                                        )
+                                    },
                                     onResetProgress = {
                                         resetEpisodeProgress(app, scope, itemId, episode.id, durationSec)
                                     },

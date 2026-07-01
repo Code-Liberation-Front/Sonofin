@@ -116,6 +116,7 @@ data class PodcastEpisode(
     val season: String? = null,
     /** Track number on the disc. */
     val episode: String? = null,
+    val genres: List<String> = emptyList(),
     val audioFile: AudioFile? = null,
     val audioTrack: AudioTrack? = null,
 )
@@ -207,6 +208,7 @@ data class JfItem(
     @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
     @SerialName("ChildCount") val childCount: Int? = null,
     @SerialName("Overview") val overview: String? = null,
+    @SerialName("Genres") val genres: List<String> = emptyList(),
     @SerialName("UserData") val userData: JfUserData? = null,
 )
 

@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PlaylistRemove
 import androidx.compose.material.icons.filled.Podcasts
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.RemoveDone
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.CircularProgressIndicator
@@ -173,7 +175,7 @@ fun RowScope.EpisodeRowContent(
     }
 }
 
-/** Options shown in an episode's long-press context menu. */
+/** Options shown in a song's long-press context menu. */
 class EpisodeMenuActions(
     val isFinished: Boolean,
     val isDownloaded: Boolean,
@@ -185,6 +187,12 @@ class EpisodeMenuActions(
     val onToggleDownload: () -> Unit,
     /** When non-null, a "Remove from playlist" entry is shown (playlist screen). */
     val onRemoveFromPlaylist: (() -> Unit)? = null,
+    /** Whether the song is pinned to the Library tab. */
+    val isPinned: Boolean = false,
+    /** When non-null, a "Pin/Unpin" entry is shown. */
+    val onTogglePin: (() -> Unit)? = null,
+    /** When non-null, a "Play next" entry is shown. */
+    val onPlayNext: (() -> Unit)? = null,
 )
 
 /**
@@ -219,6 +227,26 @@ fun EpisodeLongPressBox(
             offset = DpOffset(x = 8.dp, y = 0.dp),
             shape = RoundedCornerShape(16.dp),
         ) {
+            actions.onPlayNext?.let { playNext ->
+                DropdownMenuItem(
+                    text = { Text("Play next") },
+                    leadingIcon = { Icon(Icons.Filled.QueueMusic, contentDescription = null) },
+                    onClick = {
+                        menuOpen = false
+                        playNext()
+                    },
+                )
+            }
+            actions.onTogglePin?.let { togglePin ->
+                DropdownMenuItem(
+                    text = { Text(if (actions.isPinned) "Unpin" else "Pin") },
+                    leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                    onClick = {
+                        menuOpen = false
+                        togglePin()
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("Reset listen time") },
                 leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
@@ -419,6 +447,29 @@ fun bulkDownloadByIds(
         }
     }
 }
+
+/** Pins a song to the Library tab, or unpins it if already pinned. */
+fun togglePinnedSong(
+    app: ShelfieApp,
+    itemId: String,
+    episodeId: String,
+    title: String,
+    subtitle: String,
+) {
+    app.pins.toggle(
+        app.shelfie.pin.PinnedItem(
+            kind = "song",
+            id = itemId,
+            songId = episodeId,
+            title = title,
+            subtitle = subtitle,
+        ),
+    )
+}
+
+/** Whether a song is pinned, given the collected pin list. */
+fun isSongPinned(pins: List<app.shelfie.pin.PinnedItem>, itemId: String, episodeId: String): Boolean =
+    pins.any { it.kind == "song" && it.id == itemId && it.songId == episodeId }
 
 /** Downloads an episode for offline use, or removes the local copy. */
 fun toggleEpisodeDownload(

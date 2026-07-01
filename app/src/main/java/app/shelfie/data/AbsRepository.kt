@@ -60,6 +60,15 @@ class AbsRepository(
     private var latestCache: List<PodcastEpisode> = emptyList()
 
     @Volatile
+    private var songsCache: List<PodcastEpisode> = emptyList()
+
+    @Volatile
+    private var topPicksCache: List<LibraryItemSummary> = emptyList()
+
+    @Volatile
+    private var mixesCache: List<Mix> = emptyList()
+
+    @Volatile
     private var librariesCache: List<Library> = emptyList()
 
     // Bumped whenever progress is changed from the UI (reset / mark played),
@@ -131,6 +140,9 @@ class AbsRepository(
         progressByTrack.clear()
         albumsCache = emptyList()
         latestCache = emptyList()
+        songsCache = emptyList()
+        topPicksCache = emptyList()
+        mixesCache = emptyList()
         librariesCache = emptyList()
         settings.clear()
     }
@@ -172,6 +184,9 @@ class AbsRepository(
         settings.saveLibraryId(libraryId)
         albumsCache = emptyList()
         latestCache = emptyList()
+        songsCache = emptyList()
+        topPicksCache = emptyList()
+        mixesCache = emptyList()
         itemCache.clear()
         progressByTrack.clear()
         runCatching {
@@ -276,6 +291,109 @@ class AbsRepository(
     /** Most recently added albums in the library. */
     suspend fun recentlyAdded(limit: Int = 12, forceRefresh: Boolean = false): List<LibraryItemSummary> =
         podcasts(forceRefresh).sortedByDescending { it.addedAt }.take(limit)
+
+    /** Every song in the active library, sorted by name. */
+    suspend fun songs(forceRefresh: Boolean = false): List<PodcastEpisode> {
+        if (!forceRefresh && songsCache.isNotEmpty()) return songsCache
+        val result = try {
+            requireApi().items(
+                userId = requireUserId(),
+                parentId = activeLibraryId(),
+                includeItemTypes = "Audio",
+                recursive = true,
+                sortBy = "SortName",
+                sortOrder = "Ascending",
+            ).items.map { toEpisode(it, it.albumId ?: "") }
+                .also { diskCacheWrite("songs.json", it) }
+        } catch (e: Exception) {
+            diskCacheRead<List<PodcastEpisode>>("songs.json") ?: throw e
+        }
+        songsCache = result
+        return result
+    }
+
+    /** The albums the user plays most, for the Home "Top Picks" shelf. */
+    suspend fun topPicks(limit: Int = 10, forceRefresh: Boolean = false): List<LibraryItemSummary> {
+        if (!forceRefresh && topPicksCache.isNotEmpty()) return topPicksCache
+        val played = runCatching {
+            requireApi().items(
+                userId = requireUserId(),
+                parentId = activeLibraryId(),
+                includeItemTypes = "MusicAlbum",
+                recursive = true,
+                sortBy = "PlayCount",
+                sortOrder = "Descending",
+                limit = limit,
+            ).items.map { it.toSummary() }
+        }.getOrDefault(emptyList())
+        // A fresh library has no play history yet; rotate a daily selection instead.
+        val result = played.ifEmpty {
+            podcasts(forceRefresh).shuffled(kotlin.random.Random(daySeed())).take(limit)
+        }
+        topPicksCache = result
+        return result
+    }
+
+    /** A generated Apple Music-style mix: a themed queue built from the library. */
+    data class Mix(
+        val id: String,
+        val title: String,
+        val subtitle: String,
+        val songs: List<PodcastEpisode>,
+    )
+
+    /**
+     * "Made for You" mixes generated locally: one per major genre, artist
+     * essentials to fill, plus a Discovery Mix. Reshuffled daily (stable seed
+     * per day so the shelf doesn't churn while browsing).
+     */
+    suspend fun madeForYou(count: Int = 6, forceRefresh: Boolean = false): List<Mix> {
+        if (!forceRefresh && mixesCache.isNotEmpty()) return mixesCache
+        val all = runCatching { songs(forceRefresh) }.getOrDefault(emptyList())
+        if (all.isEmpty()) return emptyList()
+        val seed = daySeed()
+        val mixes = mutableListOf<Mix>()
+
+        val byGenre = all.flatMap { song -> song.genres.map { it.trim() to song } }
+            .filter { it.first.isNotBlank() }
+            .groupBy({ it.first }, { it.second })
+            .filterValues { it.size >= 4 }
+            .entries.sortedByDescending { it.value.size }
+        for ((genre, tracks) in byGenre) {
+            if (mixes.size >= count - 1) break
+            mixes += Mix(
+                id = "genre:$genre",
+                title = "$genre Mix",
+                subtitle = "${tracks.size} songs in your library",
+                songs = tracks.shuffled(kotlin.random.Random(seed + genre.hashCode())).take(25),
+            )
+        }
+        if (mixes.size < count - 1) {
+            val byArtist = all.filterNot { it.subtitle.isNullOrBlank() }
+                .groupBy { it.subtitle.orEmpty() }
+                .filterValues { it.size >= 4 }
+                .entries.sortedByDescending { it.value.size }
+            for ((artist, tracks) in byArtist) {
+                if (mixes.size >= count - 1) break
+                mixes += Mix(
+                    id = "artist:$artist",
+                    title = "$artist Essentials",
+                    subtitle = "The best of $artist",
+                    songs = tracks.shuffled(kotlin.random.Random(seed + artist.hashCode())).take(25),
+                )
+            }
+        }
+        mixes += Mix(
+            id = "discovery",
+            title = "Discovery Mix",
+            subtitle = "Fresh picks from your library",
+            songs = all.shuffled(kotlin.random.Random(seed)).take(25),
+        )
+        mixesCache = mixes
+        return mixes
+    }
+
+    suspend fun mix(id: String): Mix? = madeForYou().firstOrNull { it.id == id }
 
     /** Newest tracks added to the library, latest first. */
     suspend fun latestEpisodes(limit: Int = 75, forceRefresh: Boolean = false): List<PodcastEpisode> {
@@ -416,6 +534,7 @@ class AbsRepository(
             publishedAt = parseJfDate(track.premiereDate ?: track.dateCreated).takeIf { it > 0 },
             season = track.parentIndexNumber?.toString(),
             episode = track.indexNumber?.toString(),
+            genres = track.genres,
             audioTrack = AudioTrack(
                 duration = ticksToSec(track.runTimeTicks),
                 contentUrl = "/Audio/${track.id}/stream?static=true",
@@ -489,6 +608,9 @@ class AbsRepository(
 
     companion object {
         private const val CLIENT_VERSION = "0.1.0"
+
+        /** A seed that changes once a day, so generated shelves are stable while browsing. */
+        private fun daySeed(): Int = (System.currentTimeMillis() / 86_400_000L).toInt()
 
         private fun ticksToSec(ticks: Long?): Double = (ticks ?: 0L) / 10_000_000.0
 

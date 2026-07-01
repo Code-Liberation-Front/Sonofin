@@ -4,6 +4,7 @@ import android.app.Application
 import app.shelfie.data.AbsRepository
 import app.shelfie.data.SettingsStore
 import app.shelfie.download.DownloadCenter
+import app.shelfie.pin.PinStore
 import app.shelfie.playlist.PlaylistStore
 import java.io.File
 
@@ -15,4 +16,5 @@ class ShelfieApp : Application() {
     }
     val downloads: DownloadCenter by lazy { DownloadCenter(this, repository, settings) }
     val playlist: PlaylistStore by lazy { PlaylistStore(this) }
+    val pins: PinStore by lazy { PinStore(this) }
 }

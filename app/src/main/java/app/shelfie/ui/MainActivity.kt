@@ -26,11 +26,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import android.net.Uri
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.PlaylistPlay
-import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
@@ -142,11 +141,11 @@ fun ShelfieRoot(app: ShelfieApp, controller: MediaController?, loginError: Strin
 
 private data class BottomTab(val route: String, val label: String, val icon: ImageVector)
 
+// Apple Music-style tabs.
 private val BOTTOM_TABS = listOf(
     BottomTab("home", "Home", Icons.Filled.Home),
-    BottomTab("latest", "Latest", Icons.Filled.Schedule),
-    BottomTab("library", "Library", Icons.Filled.GridView),
-    BottomTab("playlist", "Playlist", Icons.Filled.PlaylistPlay),
+    BottomTab("library", "Library", Icons.Filled.LibraryMusic),
+    BottomTab("search", "Search", Icons.Filled.Search),
 )
 
 @Composable
@@ -204,7 +203,6 @@ private fun MainScaffold(
             Column {
                 if (onTabScreen) {
                     ShelfieTopBar(
-                        onSearch = { navController.navigate("search") { launchSingleTop = true } },
                         onSettings = { navController.navigate("settings") { launchSingleTop = true } },
                     )
                 }
@@ -261,30 +259,75 @@ private fun MainScaffold(
                         app = app,
                         controller = controller,
                         onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
-                    )
-                }
-            }
-            composable("latest") {
-                if (!isOnline) {
-                    OfflineTabHint()
-                } else {
-                    LatestScreen(
-                        app = app,
-                        controller = controller,
-                        playerState = playerState,
-                        onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
+                        onOpenMix = { mixId -> navController.navigate("mix/${Uri.encode(mixId)}") },
                     )
                 }
             }
             composable("library") {
+                LibraryScreen(
+                    app = app,
+                    controller = controller,
+                    onOpenAlbum = { itemId -> navController.navigate("podcast/$itemId") },
+                    onOpenAlbums = { navController.navigate("albums") { launchSingleTop = true } },
+                    onOpenArtists = { navController.navigate("artists") { launchSingleTop = true } },
+                    onOpenArtist = { name -> navController.navigate("artist/${Uri.encode(name)}") },
+                    onOpenSongs = { navController.navigate("songs") { launchSingleTop = true } },
+                    onOpenPlaylists = { navController.navigate("playlists") { launchSingleTop = true } },
+                )
+            }
+            composable("search") {
                 if (!isOnline) {
                     OfflineTabHint()
                 } else {
-                    PodcastsScreen(
+                    SearchScreen(
                         app = app,
+                        controller = controller,
                         onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
+                        onBack = {},
+                        showBack = false,
                     )
                 }
+            }
+            composable("albums") {
+                PodcastsScreen(
+                    app = app,
+                    onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable("artists") {
+                ArtistsScreen(
+                    app = app,
+                    onBack = { navController.popBackStack() },
+                    onOpenArtist = { name -> navController.navigate("artist/${Uri.encode(name)}") },
+                )
+            }
+            composable("artist/{name}") { entry ->
+                ArtistDetailScreen(
+                    app = app,
+                    artistName = entry.arguments?.getString("name").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                    onOpenAlbum = { itemId -> navController.navigate("podcast/$itemId") },
+                )
+            }
+            composable("songs") {
+                SongsScreen(
+                    app = app,
+                    controller = controller,
+                    playerState = playerState,
+                    onBack = { navController.popBackStack() },
+                    onOpenAlbum = { itemId -> navController.navigate("podcast/$itemId") },
+                )
+            }
+            composable("mix/{mixId}") { entry ->
+                MixScreen(
+                    app = app,
+                    controller = controller,
+                    playerState = playerState,
+                    mixId = entry.arguments?.getString("mixId").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                    onOpenAlbum = { itemId -> navController.navigate("podcast/$itemId") },
+                )
             }
             composable("podcast/{itemId}") { entry ->
                 val itemId = entry.arguments?.getString("itemId").orEmpty()
@@ -296,20 +339,12 @@ private fun MainScaffold(
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable("playlist") {
+            composable("playlists") {
                 PlaylistScreen(
                     app = app,
                     controller = controller,
                     playerState = playerState,
                     onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
-                )
-            }
-            composable("search") {
-                SearchScreen(
-                    app = app,
-                    controller = controller,
-                    onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
-                    onBack = { navController.popBackStack() },
                 )
             }
             composable("settings") {
@@ -330,7 +365,7 @@ private fun MainScaffold(
 }
 
 @Composable
-private fun ShelfieTopBar(onSearch: () -> Unit, onSettings: () -> Unit) {
+private fun ShelfieTopBar(onSettings: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -353,9 +388,6 @@ private fun ShelfieTopBar(onSearch: () -> Unit, onSettings: () -> Unit) {
             modifier = Modifier.padding(start = 10.dp),
         )
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = onSearch) {
-            Icon(Icons.Filled.Search, contentDescription = "Search")
-        }
         CastButton(modifier = Modifier.size(44.dp))
         IconButton(onClick = onSettings) {
             Icon(Icons.Filled.Settings, contentDescription = "Settings")

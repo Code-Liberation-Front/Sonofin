@@ -88,8 +88,15 @@ fun EpisodesScreen(
         value = withContext(Dispatchers.IO) {
             try {
                 val podcast = app.repository.podcast(itemId)
+                // Album order: disc number, then track number, then title.
                 val rows = podcast.media.episodes
-                    .sortedByDescending { it.publishedAt ?: 0 }
+                    .sortedWith(
+                        compareBy(
+                            { it.season?.toIntOrNull() ?: 0 },
+                            { it.episode?.toIntOrNull() ?: Int.MAX_VALUE },
+                            { it.title.orEmpty() },
+                        ),
+                    )
                     .map { episode ->
                         val progress = runCatching {
                             app.repository.progress(itemId, episode.id)
@@ -124,6 +131,7 @@ fun EpisodesScreen(
             val scope = rememberCoroutineScope()
             val completedDownloads by app.downloads.completed.collectAsState()
             val activeDownloads by app.downloads.active.collectAsState()
+            val pins by app.pins.pins.collectAsState()
             var pickerEntry by remember { mutableStateOf<PlaylistEntry?>(null) }
             var selectMode by remember { mutableStateOf(false) }
             var selectedIds by remember { mutableStateOf(emptySet<String>()) }
@@ -164,6 +172,19 @@ fun EpisodesScreen(
                         coverUrl = app.repository.coverUrl(itemId),
                         onBack = onBack,
                     )
+                }
+                if (episodeRows.isNotEmpty()) {
+                    item {
+                        Box(Modifier.padding(horizontal = 16.dp)) {
+                            PlayShuffleButtons(
+                                enabled = true,
+                                onPlay = { controller?.playSongs(episodeRows.map { it.episode }) },
+                                onShuffle = {
+                                    controller?.playSongs(episodeRows.map { it.episode }.shuffled())
+                                },
+                            )
+                        }
+                    }
                 }
                 if (episodeRows.isNotEmpty()) {
                     item {
@@ -230,6 +251,15 @@ fun EpisodesScreen(
                         actions = EpisodeMenuActions(
                             isFinished = row.isFinished,
                             isDownloaded = isDownloaded,
+                            isPinned = isSongPinned(pins, itemId, row.episode.id),
+                            onPlayNext = { controller?.playNext(itemId, row.episode.id) },
+                            onTogglePin = {
+                                togglePinnedSong(
+                                    app, itemId, row.episode.id,
+                                    title = row.episode.title ?: "Song",
+                                    subtitle = state.podcast.media.metadata.title.orEmpty(),
+                                )
+                            },
                             onResetProgress = {
                                 resetEpisodeProgress(app, scope, itemId, row.episode.id, durationSec)
                             },
@@ -378,12 +408,10 @@ private fun EpisodeRow(
     val episode = row.episode
     val completed = isNearlyComplete(row.progressFraction, row.isFinished)
     val durationSec = (episode.audioTrack?.duration ?: episode.audioFile?.duration ?: 0.0).toLong()
-    val dateLine = listOf(
-        formatEpisodeDate(episode.publishedAt, episode.pubDate),
-        formatDuration(durationSec),
-    )
-        .filter { it.isNotBlank() }
-        .joinToString(" • ")
+    val dateLine = listOfNotNull(
+        episode.episode?.let { "Track $it" },
+        formatDuration(durationSec).takeIf { it.isNotBlank() },
+    ).joinToString(" • ")
 
     val rowContent: @Composable () -> Unit = {
         Row(
@@ -399,7 +427,7 @@ private fun EpisodeRow(
             EpisodeRowContent(
                 coverUrl = coverUrl,
                 title = episode.title ?: "Song",
-                subtitle = null,
+                subtitle = episode.subtitle,
                 dateLine = dateLine,
                 progressFraction = row.progressFraction,
                 completed = completed,

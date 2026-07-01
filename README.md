@@ -9,8 +9,11 @@ Sonofin connects to your self-hosted [Jellyfin](https://jellyfin.org/) server an
 ## What it does
 
 - **Sign in to your server** — works with any Jellyfin instance (HTTPS or HTTP) using your username and password
-- **Home / Latest / Library tabs** — Home shows Recently Played and Recently Added shelves; Latest lists the newest tracks added across your library; Library is the full album cover-art grid
-- **Search** — find albums and songs by name from the top bar
+- **Apple Music-style tabs** — Home, Library, and Search on the bottom bar
+- **Home** — Top Picks for You (your most-played albums), Recently Played, and Made for You (genre/artist mixes plus a Discovery Mix generated daily from your library)
+- **Library** — pinned items up top, then Playlists / Artists / Albums / Songs, with Recently Added below
+- **Song long-press menu** — play next, pin to Library, add to playlist, download/remove download, go to album, mark played
+- **Search** — find albums and songs by name from its own tab
 - **Chromecast** — cast playback to a TV or speaker from the cast button in the top bar
 - **Settings** — view your account, switch servers/users, and switch between music libraries on the server
 - **Downloads & offline** — download tracks for offline listening (with live progress and speed in Settings → Downloads); the library, album track lists, and play state are cached so the app works without a connection and plays downloaded songs

@@ -38,7 +38,7 @@ interface AbsApi {
         @Query("StartIndex") startIndex: Int? = null,
         @Query("Limit") limit: Int? = null,
         // Only valid ItemFields enum values; AlbumArtist/Artists are returned by default.
-        @Query("Fields") fields: String = "DateCreated,Overview,ChildCount",
+        @Query("Fields") fields: String = "DateCreated,Overview,ChildCount,Genres",
     ): JfItemsResponse
 
     @GET("Users/{userId}/Items/{itemId}")

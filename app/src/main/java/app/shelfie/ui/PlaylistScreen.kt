@@ -101,6 +101,7 @@ fun PlaylistScreen(
     val playlists by app.playlist.playlists.collectAsState()
     val downloaded by app.downloads.completed.collectAsState()
     val activeDownloads by app.downloads.active.collectAsState()
+    val pins by app.pins.pins.collectAsState()
     val progressRevision by app.repository.progressRevision.collectAsState()
     var selectedId by rememberSaveable { mutableStateOf(DOWNLOADED_PLAYLIST_ID) }
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -323,6 +324,15 @@ fun PlaylistScreen(
                         actions = EpisodeMenuActions(
                             isFinished = meta?.isFinished == true,
                             isDownloaded = isDownloaded,
+                            isPinned = isSongPinned(pins, entry.itemId, entry.episodeId),
+                            onPlayNext = { controller?.playNext(entry.itemId, entry.episodeId) },
+                            onTogglePin = {
+                                togglePinnedSong(
+                                    app, entry.itemId, entry.episodeId,
+                                    title = entry.title,
+                                    subtitle = entry.podcastTitle,
+                                )
+                            },
                             onResetProgress = {
                                 resetEpisodeProgress(app, scope, entry.itemId, entry.episodeId, meta?.durationSec ?: 0.0)
                             },
