@@ -37,11 +37,13 @@ Sideload it by enabling *Install unknown apps* for your browser/file manager, th
 
 ## Android Auto
 
-Sonofin ships a Media3 `MediaLibraryService`, so it appears as a media app in Android Auto automatically once installed and signed in. In the car you get:
+Sonofin ships a Media3 `MediaLibraryService`, so it appears as a media app in Android Auto automatically once installed and signed in. The car browse tree mirrors the app:
 
-- **Recently Played** tab — tracks you've played recently, one tap to play
-- **Albums** tab — your library as a cover grid, tracks as lists
-- **Full-album queueing** — playing a track queues the rest of the album so next/previous track buttons work
+- **Recently Played** tab — pinned songs first, then tracks you've played recently
+- **Playlists** tab — Downloaded, your playlists, the Made for You mixes, and a Songs list
+- **Artists** tab — artists, then their albums and tracks
+- **Albums** tab — Top Picks for You up front, then the full cover grid
+- **Collection queueing** — tapping a song in an album, playlist, or mix queues the rest of that collection so next/previous work
 - **Search** — both the browse search UI and voice ("play *<album>* on Sonofin")
 - **Resume** — Auto's resume card restores your last track even after the app was killed
 

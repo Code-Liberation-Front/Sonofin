@@ -29,7 +29,10 @@ import app.shelfie.data.BookTrack
 import app.shelfie.data.LibraryItemExpanded
 import app.shelfie.data.LibraryItemSummary
 import app.shelfie.data.PodcastEpisode
+import app.shelfie.pin.PinnedItem
 import app.shelfie.ui.MainActivity
+import app.shelfie.ui.artistsFromAlbums
+import app.shelfie.ui.sortedByAlbumOrder
 import com.google.android.gms.cast.framework.CastContext
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -47,9 +50,21 @@ import kotlinx.coroutines.withContext
 private const val ROOT_ID = "root"
 private const val CONTINUE_ID = "continue"
 private const val PODCASTS_ID = "podcasts"
+private const val PLAYLISTS_ID = "playlistsRoot"
+private const val ARTISTS_ID = "artistsRoot"
+private const val TOPPICKS_ID = "topPicks"
+private const val SONGS_ID = "allSongs"
 private const val PODCAST_PREFIX = "podcast:"
 private const val EPISODE_PREFIX = "episode:"
 private const val TRACK_PREFIX = "track:"
+private const val ARTIST_PREFIX = "artistName:"
+private const val PLAYLIST_PREFIX = "userPlaylist:"
+private const val MIX_PREFIX = "mixList:"
+// Songs browsed from a mix/playlist carry their collection so tapping one
+// queues the rest of that collection (not the song's album).
+private const val MIXSONG_PREFIX = "mixSong:"
+private const val PLSONG_PREFIX = "plSong:"
+private const val DOWNLOADED_PLAYLIST_ID = "__downloaded__"
 
 // Extras carried on audiobook track items for progress reporting.
 private const val EXTRA_TRACK_START_OFFSET = "app.shelfie.trackStartOffset"
@@ -371,19 +386,101 @@ class PlaybackService : MediaLibraryService() {
                         when {
                             parentId == ROOT_ID -> rootTabs()
 
-                            parentId == CONTINUE_ID ->
-                                repo.continueListening().map {
+                            // Pinned songs first, then recently played — like the app.
+                            parentId == CONTINUE_ID -> {
+                                val pinned = app.pins.pins.value
+                                    .filter { it.kind == "song" && it.songId.isNotBlank() }
+                                    .map { pinnedSongItem(it) }
+                                pinned + repo.continueListening().map {
                                     episodeItem(it.podcast, it.episode, withUri = false)
                                 }
+                            }
 
-                            parentId == PODCASTS_ID ->
-                                repo.podcasts().map { it.toBrowsableItem() }
+                            parentId == PLAYLISTS_ID -> playlistFolders()
+
+                            parentId == ARTISTS_ID ->
+                                artistsFromAlbums(repo.podcasts()).map { artist ->
+                                    folderItem(
+                                        id = "$ARTIST_PREFIX${artist.name}",
+                                        title = artist.name,
+                                        subtitle = if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums",
+                                        extras = Bundle().apply { putInt(EXTRA_STYLE_BROWSABLE, STYLE_GRID) },
+                                        artworkUri = Uri.parse(repo.coverUrl(artist.coverAlbumId)),
+                                    )
+                                }
+
+                            parentId.startsWith(ARTIST_PREFIX) -> {
+                                val name = parentId.removePrefix(ARTIST_PREFIX)
+                                repo.podcasts()
+                                    .filter {
+                                        it.media.metadata.displayAuthor?.trim().orEmpty()
+                                            .ifBlank { "Unknown Artist" } == name
+                                    }
+                                    .map { it.toBrowsableItem() }
+                            }
+
+                            parentId == TOPPICKS_ID ->
+                                repo.topPicks().map { it.toBrowsableItem() }
+
+                            parentId == SONGS_ID ->
+                                repo.songsPage(0, 100).songs.map { songItem(it) }
+
+                            parentId.startsWith(MIX_PREFIX) -> {
+                                val mixId = parentId.removePrefix(MIX_PREFIX)
+                                repo.mix(mixId)?.songs.orEmpty().map { song ->
+                                    songItem(song, mediaId = "$MIXSONG_PREFIX$mixId:${song.libraryItemId}:${song.id}")
+                                }
+                            }
+
+                            parentId.startsWith(PLAYLIST_PREFIX) -> {
+                                val playlistId = parentId.removePrefix(PLAYLIST_PREFIX)
+                                if (playlistId == DOWNLOADED_PLAYLIST_ID) {
+                                    app.downloads.completed.value.map { entry ->
+                                        collectionSongItem(
+                                            mediaId = "$PLSONG_PREFIX$playlistId:${entry.itemId}:${entry.episodeId}",
+                                            title = entry.title,
+                                            subtitle = entry.podcastTitle,
+                                            coverItemId = entry.itemId,
+                                        )
+                                    }
+                                } else {
+                                    app.playlist.playlists.value
+                                        .firstOrNull { it.id == playlistId }
+                                        ?.entries.orEmpty()
+                                        .map { entry ->
+                                            collectionSongItem(
+                                                mediaId = "$PLSONG_PREFIX$playlistId:${entry.itemId}:${entry.episodeId}",
+                                                title = entry.title,
+                                                subtitle = entry.podcastTitle,
+                                                coverItemId = entry.itemId,
+                                            )
+                                        }
+                                }
+                            }
+
+                            // Top Picks shelf leads the Albums grid, like Home.
+                            parentId == PODCASTS_ID -> {
+                                val topPicks = runCatching { repo.topPicks() }.getOrDefault(emptyList())
+                                val shelf = if (topPicks.isEmpty()) {
+                                    emptyList()
+                                } else {
+                                    listOf(
+                                        folderItem(
+                                            id = TOPPICKS_ID,
+                                            title = "Top Picks for You",
+                                            extras = Bundle().apply { putInt(EXTRA_STYLE_BROWSABLE, STYLE_GRID) },
+                                            artworkUri = Uri.parse(repo.coverUrl(topPicks.first().id)),
+                                        ),
+                                    )
+                                }
+                                shelf + repo.podcasts().map { it.toBrowsableItem() }
+                            }
 
                             parentId.startsWith(PODCAST_PREFIX) -> {
                                 val itemId = parentId.removePrefix(PODCAST_PREFIX)
                                 val podcast = repo.podcast(itemId)
                                 podcast.media.episodes
-                                    .sortedByDescending { it.publishedAt ?: 0 }
+                                    .sortedByAlbumOrder()
                                     .map { episodeItem(podcast, it, withUri = false) }
                             }
 
@@ -475,8 +572,16 @@ class PlaybackService : MediaLibraryService() {
                         ?.requestMetadata?.searchQuery
                     val episodeIds = mediaItems.filter { it.mediaId.startsWith(EPISODE_PREFIX) }
                     val trackIds = mediaItems.filter { it.mediaId.startsWith(TRACK_PREFIX) }
+                    val mixSong = mediaItems.firstOrNull { it.mediaId.startsWith(MIXSONG_PREFIX) }
+                    val playlistSong = mediaItems.firstOrNull { it.mediaId.startsWith(PLSONG_PREFIX) }
 
                     when {
+                        // Song tapped inside a mix: queue the rest of the mix.
+                        mixSong != null -> mixQueueFor(mixSong.mediaId, startPositionMs)
+
+                        // Song tapped inside a playlist: queue the rest of it.
+                        playlistSong != null -> playlistQueueFor(playlistSong.mediaId, startPositionMs)
+
                         // Audiobook track tapped: queue the whole book at that track.
                         trackIds.isNotEmpty() ->
                             bookQueueFor(trackIds[0].mediaId, startPositionMs)
@@ -524,11 +629,22 @@ class PlaybackService : MediaLibraryService() {
             }
     }
 
+    // Android Auto shows at most four root tabs; everything else is nested.
     private fun rootTabs(): List<MediaItem> = listOf(
         folderItem(
             id = CONTINUE_ID,
             title = "Recently Played",
             extras = Bundle().apply { putInt(EXTRA_STYLE_PLAYABLE, STYLE_LIST) },
+        ),
+        folderItem(
+            id = PLAYLISTS_ID,
+            title = "Playlists",
+            extras = Bundle().apply { putInt(EXTRA_STYLE_BROWSABLE, STYLE_LIST) },
+        ),
+        folderItem(
+            id = ARTISTS_ID,
+            title = "Artists",
+            extras = Bundle().apply { putInt(EXTRA_STYLE_BROWSABLE, STYLE_LIST) },
         ),
         folderItem(
             id = PODCASTS_ID,
@@ -537,12 +653,20 @@ class PlaybackService : MediaLibraryService() {
         ),
     )
 
-    private fun folderItem(id: String, title: String, extras: Bundle): MediaItem =
+    private fun folderItem(
+        id: String,
+        title: String,
+        extras: Bundle,
+        artworkUri: Uri? = null,
+        subtitle: String? = null,
+    ): MediaItem =
         MediaItem.Builder()
             .setMediaId(id)
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
+                    .setArtist(subtitle)
+                    .setArtworkUri(artworkUri)
                     .setIsBrowsable(true)
                     .setIsPlayable(false)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
@@ -550,6 +674,38 @@ class PlaybackService : MediaLibraryService() {
                     .build(),
             )
             .build()
+
+    /** The Playlists tab: Downloaded, user playlists, Made for You mixes, all songs. */
+    private suspend fun playlistFolders(): List<MediaItem> {
+        val listExtras = { Bundle().apply { putInt(EXTRA_STYLE_PLAYABLE, STYLE_LIST) } }
+        val items = mutableListOf<MediaItem>()
+        items += folderItem(
+            id = "$PLAYLIST_PREFIX$DOWNLOADED_PLAYLIST_ID",
+            title = "Downloaded",
+            extras = listExtras(),
+        )
+        app.playlist.playlists.value.forEach { playlist ->
+            items += folderItem(
+                id = "$PLAYLIST_PREFIX${playlist.id}",
+                title = playlist.name,
+                subtitle = "${playlist.entries.size} songs",
+                extras = listExtras(),
+            )
+        }
+        runCatching { repo.madeForYou() }.getOrDefault(emptyList()).forEach { mix ->
+            items += folderItem(
+                id = "$MIX_PREFIX${mix.id}",
+                title = mix.title,
+                subtitle = mix.subtitle,
+                extras = listExtras(),
+                artworkUri = mix.songs.firstOrNull()
+                    ?.libraryItemId?.takeIf { it.isNotBlank() }
+                    ?.let { Uri.parse(repo.coverUrl(it)) },
+            )
+        }
+        items += folderItem(id = SONGS_ID, title = "Songs", extras = listExtras())
+        return items
+    }
 
     /** Browse-search and voice-search results: matching podcasts first, then episodes. */
     private suspend fun searchItems(query: String): List<MediaItem> {
@@ -567,7 +723,8 @@ class PlaybackService : MediaLibraryService() {
             episodeMatches.isNotEmpty() -> episodeMatches.first()
             podcastMatches.isNotEmpty() -> {
                 val podcast = repo.podcast(podcastMatches.first().id)
-                podcast.media.episodes.maxByOrNull { it.publishedAt ?: 0 }?.let { podcast to it }
+                // Voice-matched album: start from its first track.
+                podcast.media.episodes.sortedByAlbumOrder().firstOrNull()?.let { podcast to it }
             }
 
             else -> null
@@ -628,7 +785,7 @@ class PlaybackService : MediaLibraryService() {
         podcast: LibraryItemExpanded,
         episodeId: String,
     ): List<PodcastEpisode> {
-        val chronological = podcast.media.episodes.sortedBy { it.publishedAt ?: 0 }
+        val chronological = podcast.media.episodes.sortedByAlbumOrder()
         val start = chronological.indexOfFirst { it.id == episodeId }
         if (start == -1) return emptyList()
         val direction = if (start == chronological.lastIndex) -1 else +1
@@ -657,6 +814,17 @@ class PlaybackService : MediaLibraryService() {
     private suspend fun resolveAny(mediaId: String): MediaItem? = when {
         mediaId.startsWith(EPISODE_PREFIX) -> resolveEpisode(mediaId)
         mediaId.startsWith(TRACK_PREFIX) -> resolveTrack(mediaId)
+        // Collection-scoped songs resolve to their underlying playable song.
+        mediaId.startsWith(MIXSONG_PREFIX) ->
+            parseCollectionSongId(mediaId, MIXSONG_PREFIX)?.let { (_, albumId, songId) ->
+                resolveEpisode("$EPISODE_PREFIX$albumId:$songId")
+            }
+
+        mediaId.startsWith(PLSONG_PREFIX) ->
+            parseCollectionSongId(mediaId, PLSONG_PREFIX)?.let { (_, albumId, songId) ->
+                resolveEpisode("$EPISODE_PREFIX$albumId:$songId")
+            }
+
         else -> null
     }
 
@@ -787,6 +955,136 @@ class PlaybackService : MediaLibraryService() {
                     .build(),
             )
             .build()
+
+    /** A playable song row built from the song itself (mix, songs list, search). */
+    private suspend fun songItem(
+        episode: PodcastEpisode,
+        mediaId: String = "$EPISODE_PREFIX${episode.libraryItemId}:${episode.id}",
+        withUri: Boolean = false,
+    ): MediaItem {
+        val builder = MediaItem.Builder()
+            .setMediaId(mediaId)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(episode.title ?: "Song")
+                    .setArtist(episode.subtitle)
+                    .setArtworkUri(
+                        episode.libraryItemId.takeIf { it.isNotBlank() }
+                            ?.let { Uri.parse(repo.coverUrl(it)) },
+                    )
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                    .build(),
+            )
+        if (withUri) {
+            val localUri = app.downloads.localUri(episode.libraryItemId, episode.id)
+            if (localUri != null) {
+                builder.setUri(localUri)
+                builder.setMimeType(episode.audioFile?.mimeType ?: "audio/mpeg")
+            } else {
+                repo.streamUrl(episode.libraryItemId, episode)?.let { url ->
+                    builder.setUri(url)
+                    builder.setMimeType(episode.audioFile?.mimeType ?: "audio/mpeg")
+                }
+            }
+        }
+        return builder.build()
+    }
+
+    /** A playable row for a pinned song (title/artist come from the pin itself). */
+    private fun pinnedSongItem(pin: PinnedItem): MediaItem =
+        MediaItem.Builder()
+            .setMediaId("$EPISODE_PREFIX${pin.id}:${pin.songId}")
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(pin.title)
+                    .setArtist(pin.subtitle.ifBlank { null })
+                    .setArtworkUri(pin.id.takeIf { it.isNotBlank() }?.let { Uri.parse(repo.coverUrl(it)) })
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                    .build(),
+            )
+            .build()
+
+    /** A playable row inside a playlist, carrying the playlist in its media id. */
+    private fun collectionSongItem(
+        mediaId: String,
+        title: String,
+        subtitle: String,
+        coverItemId: String,
+    ): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(mediaId)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setArtist(subtitle.ifBlank { null })
+                    .setArtworkUri(coverItemId.takeIf { it.isNotBlank() }?.let { Uri.parse(repo.coverUrl(it)) })
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                    .build(),
+            )
+            .build()
+
+    /**
+     * Parses "<prefix><collectionId>:<albumId>:<songId>" from the END, because
+     * collection ids (e.g. "genre:Rock") may themselves contain colons while
+     * Jellyfin item ids never do.
+     */
+    private fun parseCollectionSongId(mediaId: String, prefix: String): Triple<String, String, String>? {
+        val rest = mediaId.removePrefix(prefix)
+        val songId = rest.substringAfterLast(':', "")
+        val head = rest.substringBeforeLast(':', "")
+        val albumId = head.substringAfterLast(':', "")
+        val collectionId = head.substringBeforeLast(':', "")
+        if (songId.isBlank() || albumId.isBlank() || collectionId.isBlank()) return null
+        return Triple(collectionId, albumId, songId)
+    }
+
+    /** Queues the rest of a mix starting from the tapped song. */
+    private suspend fun mixQueueFor(
+        mediaId: String,
+        startPositionMs: Long,
+    ): MediaSession.MediaItemsWithStartPosition {
+        val (mixId, albumId, songId) = parseCollectionSongId(mediaId, MIXSONG_PREFIX)
+            ?: return MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0)
+        val mix = runCatching { repo.mix(mixId) }.getOrNull()
+            ?: return podcastQueueFor("$EPISODE_PREFIX$albumId:$songId", startPositionMs)
+        val index = mix.songs.indexOfFirst { it.id == songId }.coerceAtLeast(0)
+        val queue = mix.songs.drop(index).take(50).map { songItem(it, withUri = true) }
+        if (queue.isEmpty()) {
+            return podcastQueueFor("$EPISODE_PREFIX$albumId:$songId", startPositionMs)
+        }
+        val position = if (startPositionMs == C.TIME_UNSET) 0L else startPositionMs
+        return MediaSession.MediaItemsWithStartPosition(queue, 0, position)
+    }
+
+    /** Queues the rest of a playlist (or the Downloaded list) from the tapped song. */
+    private suspend fun playlistQueueFor(
+        mediaId: String,
+        startPositionMs: Long,
+    ): MediaSession.MediaItemsWithStartPosition {
+        val (playlistId, albumId, songId) = parseCollectionSongId(mediaId, PLSONG_PREFIX)
+            ?: return MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0)
+        val entries: List<Pair<String, String>> = if (playlistId == DOWNLOADED_PLAYLIST_ID) {
+            app.downloads.completed.value.map { it.itemId to it.episodeId }
+        } else {
+            app.playlist.playlists.value.firstOrNull { it.id == playlistId }
+                ?.entries.orEmpty().map { it.itemId to it.episodeId }
+        }
+        val index = entries.indexOfFirst { it.first == albumId && it.second == songId }.coerceAtLeast(0)
+        val queue = entries.drop(index).take(50).mapNotNull { (item, ep) ->
+            runCatching { resolveEpisode("$EPISODE_PREFIX$item:$ep") }.getOrNull()
+        }
+        if (queue.isEmpty()) {
+            return podcastQueueFor("$EPISODE_PREFIX$albumId:$songId", startPositionMs)
+        }
+        val position = if (startPositionMs == C.TIME_UNSET) 0L else startPositionMs
+        return MediaSession.MediaItemsWithStartPosition(queue, 0, position)
+    }
 
     private suspend fun episodeItem(
         podcast: LibraryItemExpanded,
