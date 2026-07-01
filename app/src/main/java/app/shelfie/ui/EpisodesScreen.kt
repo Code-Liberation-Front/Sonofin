@@ -36,8 +36,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -83,30 +83,28 @@ fun EpisodesScreen(
     playerState: PlayerUiState,
     onBack: () -> Unit,
 ) {
+    var refreshKey by remember { mutableIntStateOf(0) }
     val progressRevision by app.repository.progressRevision.collectAsState()
-    val ui by produceState<EpisodesUi>(initialValue = EpisodesUi.Loading, itemId, progressRevision) {
-        value = withContext(Dispatchers.IO) {
-            try {
-                val podcast = app.repository.podcast(itemId)
-                val rows = podcast.media.episodes
-                    .sortedByAlbumOrder()
-                    .map { episode ->
-                        val progress = runCatching {
-                            app.repository.progress(itemId, episode.id)
-                        }.getOrNull()
-                        EpisodeRowData(
-                            episode = episode,
-                            progressFraction = (progress?.progress ?: 0.0).toFloat().coerceIn(0f, 1f),
-                            isFinished = progress?.isFinished == true,
-                        )
-                    }
-                EpisodesUi.Ready(podcast, rows)
-            } catch (e: Exception) {
-                EpisodesUi.Error(e.message ?: "Failed to load album")
-            }
-        }
-    }
+    val albumState = rememberServerData(
+        key = itemId,
+        refetchKey = refreshKey to progressRevision,
+        cached = {
+            app.repository.cachedAlbum(itemId)?.let { EpisodesUi.Ready(it, buildAlbumRows(app, itemId, it)) }
+        },
+        fetch = {
+            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+            val podcast = app.repository.podcast(itemId, forceRefresh = true)
+            EpisodesUi.Ready(podcast, buildAlbumRows(app, itemId, podcast))
+        },
+    )
+    val ui: EpisodesUi = albumState.data
+        ?: albumState.error?.let { EpisodesUi.Error(it) }
+        ?: EpisodesUi.Loading
 
+    RefreshablePage(
+        refreshing = albumState.refreshing,
+        onRefresh = { refreshKey++ },
+    ) {
     when (val state = ui) {
         is EpisodesUi.Loading -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -292,7 +290,24 @@ fun EpisodesScreen(
             }
         }
     }
+    }
 }
+
+/** Track rows with per-song progress, in album order. */
+private suspend fun buildAlbumRows(
+    app: ShelfieApp,
+    itemId: String,
+    podcast: LibraryItemExpanded,
+): List<EpisodeRowData> = podcast.media.episodes
+    .sortedByAlbumOrder()
+    .map { episode ->
+        val progress = runCatching { app.repository.progress(itemId, episode.id) }.getOrNull()
+        EpisodeRowData(
+            episode = episode,
+            progressFraction = (progress?.progress ?: 0.0).toFloat().coerceIn(0f, 1f),
+            isFinished = progress?.isFinished == true,
+        )
+    }
 
 @Composable
 private fun PodcastHeader(podcast: LibraryItemExpanded, coverUrl: String, onBack: () -> Unit) {

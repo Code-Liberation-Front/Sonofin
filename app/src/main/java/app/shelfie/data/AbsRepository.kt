@@ -450,6 +450,29 @@ class AbsRepository(
 
     suspend fun mix(id: String): Mix? = madeForYou().firstOrNull { it.id == id }
 
+    // ---- Cache-only accessors ----------------------------------------------
+    // Memory first, then the persisted disk cache — never the network. Screens
+    // paint these instantly, then revalidate against the server in the
+    // background and only update when something actually changed.
+
+    fun cachedAlbums(): List<LibraryItemSummary> =
+        albumsCache.ifEmpty { diskCacheRead<List<LibraryItemSummary>>("albums.json").orEmpty() }
+
+    fun cachedTopPicks(): List<LibraryItemSummary> =
+        topPicksCache.ifEmpty { diskCacheRead<List<LibraryItemSummary>>("toppicks.json").orEmpty() }
+
+    fun cachedContinueListening(): List<InProgressEpisode> =
+        recentCache.ifEmpty { diskCacheRead<List<InProgressEpisode>>("recent.json").orEmpty() }
+
+    fun cachedMixes(): List<Mix> =
+        mixesCache.ifEmpty { diskCacheRead<List<Mix>>("mixes.json").orEmpty() }
+
+    fun cachedAlbum(itemId: String): LibraryItemExpanded? =
+        itemCache[itemId] ?: diskCacheRead("item_$itemId.json")
+
+    fun cachedSongsFirstPage(): List<PodcastEpisode> =
+        diskCacheRead<List<PodcastEpisode>>("songs_page0.json").orEmpty()
+
     /** Newest tracks added to the library, latest first. */
     suspend fun latestEpisodes(limit: Int = 75, forceRefresh: Boolean = false): List<PodcastEpisode> {
         if (!forceRefresh && latestCache.isNotEmpty()) return latestCache

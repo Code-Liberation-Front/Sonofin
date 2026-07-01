@@ -26,8 +26,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,20 +66,25 @@ fun ArtistsScreen(
     onBack: () -> Unit,
     onOpenArtist: (String) -> Unit,
 ) {
-    val ui by produceState<ArtistsUi>(initialValue = ArtistsUi.Loading) {
-        value = withContext(Dispatchers.IO) {
-            try {
-                if (!app.repository.ensureConfigured()) {
-                    ArtistsUi.Error("Not logged in")
-                } else {
-                    ArtistsUi.Ready(artistsFromAlbums(app.repository.podcasts()))
-                }
-            } catch (e: Exception) {
-                ArtistsUi.Error(e.message ?: "Failed to load artists")
-            }
-        }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val artists = rememberServerData(
+        refetchKey = refreshKey,
+        cached = { artistsFromAlbums(app.repository.cachedAlbums()).ifEmpty { null } },
+        fetch = {
+            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+            artistsFromAlbums(app.repository.podcasts(forceRefresh = true))
+        },
+    )
+    val ui = when {
+        artists.data != null -> ArtistsUi.Ready(artists.data.orEmpty())
+        artists.error != null -> ArtistsUi.Error(artists.error.orEmpty())
+        else -> ArtistsUi.Loading
     }
 
+    RefreshablePage(
+        refreshing = artists.refreshing,
+        onRefresh = { refreshKey++ },
+    ) {
     when (val state = ui) {
         is ArtistsUi.Loading -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -147,7 +154,14 @@ fun ArtistsScreen(
             }
         }
     }
+    }
 }
+
+/** Albums credited to [artistName], from an album list. */
+private fun albumsForArtist(albums: List<LibraryItemSummary>, artistName: String): List<LibraryItemSummary> =
+    albums.filter {
+        it.media.metadata.displayAuthor?.trim().orEmpty().ifBlank { "Unknown Artist" } == artistName
+    }
 
 @Composable
 fun ArtistDetailScreen(
@@ -157,19 +171,26 @@ fun ArtistDetailScreen(
     onOpenAlbum: (String) -> Unit,
     controller: androidx.media3.session.MediaController? = null,
 ) {
-    val ui by produceState<ArtistsUiDetail>(initialValue = ArtistsUiDetail.Loading, artistName) {
-        value = withContext(Dispatchers.IO) {
-            try {
-                val albums = app.repository.podcasts().filter {
-                    it.media.metadata.displayAuthor?.trim().orEmpty().ifBlank { "Unknown Artist" } == artistName
-                }
-                ArtistsUiDetail.Ready(albums)
-            } catch (e: Exception) {
-                ArtistsUiDetail.Error(e.message ?: "Failed to load artist")
-            }
-        }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val albumsState = rememberServerData(
+        key = artistName,
+        refetchKey = refreshKey,
+        cached = { albumsForArtist(app.repository.cachedAlbums(), artistName).ifEmpty { null } },
+        fetch = {
+            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+            albumsForArtist(app.repository.podcasts(forceRefresh = true), artistName)
+        },
+    )
+    val ui = when {
+        albumsState.data != null -> ArtistsUiDetail.Ready(albumsState.data.orEmpty())
+        albumsState.error != null -> ArtistsUiDetail.Error(albumsState.error.orEmpty())
+        else -> ArtistsUiDetail.Loading
     }
 
+    RefreshablePage(
+        refreshing = albumsState.refreshing,
+        onRefresh = { refreshKey++ },
+    ) {
     when (val state = ui) {
         is ArtistsUiDetail.Loading -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -223,6 +244,7 @@ fun ArtistDetailScreen(
                 }
             }
         }
+    }
     }
 }
 

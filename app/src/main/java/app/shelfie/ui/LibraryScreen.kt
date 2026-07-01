@@ -33,8 +33,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -67,14 +67,26 @@ fun LibraryScreen(
 ) {
     val scope = rememberCoroutineScope()
     val pins by app.pins.pins.collectAsState()
-    val recentlyAdded by produceState(initialValue = emptyList<LibraryItemSummary>()) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                if (app.repository.ensureConfigured()) app.repository.recentlyAdded(12) else emptyList()
-            }.getOrDefault(emptyList())
-        }
-    }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val recentState = rememberServerData(
+        refetchKey = refreshKey,
+        cached = {
+            app.repository.cachedAlbums()
+                .sortedByDescending { it.addedAt }
+                .take(12)
+                .ifEmpty { null }
+        },
+        fetch = {
+            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+            app.repository.recentlyAdded(12, forceRefresh = true)
+        },
+    )
+    val recentlyAdded = recentState.data.orEmpty()
 
+    RefreshablePage(
+        refreshing = recentState.refreshing,
+        onRefresh = { refreshKey++ },
+    ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 12.dp),
@@ -150,6 +162,7 @@ fun LibraryScreen(
                 }
             }
         }
+    }
     }
 }
 

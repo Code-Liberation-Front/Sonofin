@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
@@ -61,6 +62,7 @@ fun SearchScreen(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
+    var refreshKey by remember { mutableIntStateOf(0) }
     var results by remember { mutableStateOf<SearchResults?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -73,7 +75,7 @@ fun SearchScreen(
         PlaylistPickerDialog(app = app, entry = entry, onDismiss = { pickerEntry = null })
     }
 
-    LaunchedEffect(query) {
+    LaunchedEffect(query, refreshKey) {
         error = null
         if (query.isBlank()) {
             results = null
@@ -81,7 +83,7 @@ fun SearchScreen(
             return@LaunchedEffect
         }
         searching = true
-        delay(400) // debounce typing
+        if (refreshKey == 0) delay(400) // debounce typing; refreshes run immediately
         val outcome = withContext(Dispatchers.IO) {
             runCatching {
                 val (podcasts, episodes) = app.repository.search(query)
@@ -89,7 +91,7 @@ fun SearchScreen(
             }
         }
         outcome.fold(
-            onSuccess = { results = it },
+            onSuccess = { fresh -> if (fresh != results) results = fresh },
             onFailure = { error = it.message ?: "Search failed" },
         )
         searching = false
@@ -116,8 +118,12 @@ fun SearchScreen(
             )
         }
 
+        RefreshablePage(
+            refreshing = searching && results != null,
+            onRefresh = { if (query.isNotBlank()) refreshKey++ },
+        ) {
         when {
-            searching -> {
+            searching && results == null -> {
                 Row(
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -206,6 +212,7 @@ fun SearchScreen(
                     }
                 }
             }
+        }
         }
     }
 }

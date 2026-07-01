@@ -59,20 +59,18 @@ fun PodcastsScreen(
     controller: androidx.media3.session.MediaController? = null,
 ) {
     var refreshKey by remember { mutableIntStateOf(0) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    val ui by produceState<PodcastsUi>(initialValue = PodcastsUi.Loading, refreshKey) {
-        value = withContext(Dispatchers.IO) {
-            try {
-                if (!app.repository.ensureConfigured()) {
-                    PodcastsUi.Error("Not logged in")
-                } else {
-                    PodcastsUi.Ready(app.repository.podcasts(forceRefresh = refreshKey > 0))
-                }
-            } catch (e: Exception) {
-                PodcastsUi.Error(e.message ?: "Failed to load albums")
-            }
-        }
-        isRefreshing = false
+    val albums = rememberServerData(
+        refetchKey = refreshKey,
+        cached = { app.repository.cachedAlbums().ifEmpty { null } },
+        fetch = {
+            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+            app.repository.podcasts(forceRefresh = true)
+        },
+    )
+    val ui = when {
+        albums.data != null -> PodcastsUi.Ready(albums.data.orEmpty())
+        albums.error != null -> PodcastsUi.Error(albums.error.orEmpty())
+        else -> PodcastsUi.Loading
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -93,13 +91,9 @@ fun PodcastsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = {
-                isRefreshing = true
-                refreshKey++
-            },
-            modifier = Modifier.fillMaxSize(),
+        RefreshablePage(
+            refreshing = albums.refreshing,
+            onRefresh = { refreshKey++ },
         ) {
             PodcastsContent(app, controller, onOpenPodcast, ui, onRetry = { refreshKey++ })
         }

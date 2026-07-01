@@ -66,8 +66,10 @@ fun SongsScreen(
     var songs by remember { mutableStateOf<List<PodcastEpisode>>(emptyList()) }
     var total by remember { mutableIntStateOf(0) }
     var initialLoading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
     var loadingMore by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var refreshKey by remember { mutableIntStateOf(0) }
 
     suspend fun loadPage(startIndex: Int) {
         val result = withContext(Dispatchers.IO) {
@@ -78,10 +80,16 @@ fun SongsScreen(
         }
         result.fold(
             onSuccess = { page ->
-                // Pages can overlap after a refresh; de-dup by song id.
-                val merged = (songs + page.songs).distinctBy { it.id }
-                songs = merged
-                total = page.total
+                if (startIndex == 0) {
+                    // Revalidation of the first page: only replace what's shown
+                    // when the server actually returned something different.
+                    total = page.total
+                    if (songs.take(page.songs.size) != page.songs) songs = page.songs
+                } else {
+                    // Pages can overlap after a refresh; de-dup by song id.
+                    songs = (songs + page.songs).distinctBy { it.id }
+                    total = page.total
+                }
                 error = null
             },
             onFailure = { e ->
@@ -90,8 +98,21 @@ fun SongsScreen(
         )
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(refreshKey) {
+        // Paint the persisted first page instantly, then revalidate.
+        if (songs.isEmpty()) {
+            val cachedFirst = withContext(Dispatchers.IO) {
+                runCatching { app.repository.cachedSongsFirstPage() }.getOrDefault(emptyList())
+            }
+            if (cachedFirst.isNotEmpty()) {
+                songs = cachedFirst
+                total = cachedFirst.size
+                initialLoading = false
+            }
+        }
+        refreshing = true
         loadPage(0)
+        refreshing = false
         initialLoading = false
     }
 
@@ -110,41 +131,46 @@ fun SongsScreen(
         }
     }
 
-    when {
-        initialLoading -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+    RefreshablePage(
+        refreshing = refreshing && !initialLoading,
+        onRefresh = { refreshKey++ },
+    ) {
+        when {
+            initialLoading -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
             }
-        }
 
-        error != null && songs.isEmpty() -> {
-            Column(
-                Modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+            error != null && songs.isEmpty() -> {
+                Column(
+                    Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                }
             }
-        }
 
-        else -> {
-            val subtitle = if (songs.size < total) {
-                "${songs.size} of $total songs"
-            } else {
-                "${songs.size} songs"
+            else -> {
+                val subtitle = if (songs.size < total) {
+                    "${songs.size} of $total songs"
+                } else {
+                    "${songs.size} songs"
+                }
+                SongListView(
+                    app = app,
+                    controller = controller,
+                    playerState = playerState,
+                    title = "Songs",
+                    subtitle = subtitle,
+                    songs = songs,
+                    onBack = onBack,
+                    onOpenAlbum = onOpenAlbum,
+                    listState = listState,
+                    loadingMore = loadingMore,
+                )
             }
-            SongListView(
-                app = app,
-                controller = controller,
-                playerState = playerState,
-                title = "Songs",
-                subtitle = subtitle,
-                songs = songs,
-                onBack = onBack,
-                onOpenAlbum = onOpenAlbum,
-                listState = listState,
-                loadingMore = loadingMore,
-            )
         }
     }
 }
@@ -159,43 +185,49 @@ fun MixScreen(
     onBack: () -> Unit,
     onOpenAlbum: (String) -> Unit,
 ) {
-    val mixState by produceState<Result<AbsRepository.Mix?>?>(initialValue = null, mixId) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
-                app.repository.mix(mixId)
-            }
-        }
-    }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val mixState = rememberServerData(
+        key = mixId,
+        refetchKey = refreshKey,
+        cached = { app.repository.cachedMixes().firstOrNull { it.id == mixId } },
+        fetch = {
+            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+            // Only regenerate the mixes on an explicit pull-to-refresh.
+            app.repository.madeForYou(forceRefresh = refreshKey > 0).firstOrNull { it.id == mixId }
+                ?: throw IllegalStateException("This mix is no longer available")
+        },
+    )
 
-    when {
-        mixState == null -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+    RefreshablePage(
+        refreshing = mixState.refreshing,
+        onRefresh = { refreshKey++ },
+    ) {
+        val mix = mixState.data
+        when {
+            mix == null && mixState.error != null -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(mixState.error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                }
             }
-        }
 
-        mixState?.isFailure == true || mixState?.getOrNull() == null -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    mixState?.exceptionOrNull()?.message ?: "This mix is no longer available",
-                    color = MaterialTheme.colorScheme.error,
+            mix == null -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+
+            else -> {
+                SongListView(
+                    app = app,
+                    controller = controller,
+                    playerState = playerState,
+                    title = mix.title,
+                    subtitle = mix.subtitle,
+                    songs = mix.songs,
+                    onBack = onBack,
+                    onOpenAlbum = onOpenAlbum,
                 )
             }
-        }
-
-        else -> {
-            val mix = mixState?.getOrNull() ?: return
-            SongListView(
-                app = app,
-                controller = controller,
-                playerState = playerState,
-                title = mix.title,
-                subtitle = mix.subtitle,
-                songs = mix.songs,
-                onBack = onBack,
-                onOpenAlbum = onOpenAlbum,
-            )
         }
     }
 }

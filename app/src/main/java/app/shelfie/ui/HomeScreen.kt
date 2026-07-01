@@ -49,17 +49,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
-private sealed interface HomeUi {
-    data object Loading : HomeUi
-    data class Error(val message: String) : HomeUi
-    data class Ready(
-        val topPicks: List<LibraryItemSummary>,
-        val inProgress: List<AbsRepository.InProgressEpisode>,
-        val mixes: List<AbsRepository.Mix>,
-    ) : HomeUi
+private data class HomeShelves(
+    val topPicks: List<LibraryItemSummary>,
+    val inProgress: List<AbsRepository.InProgressEpisode>,
+    val mixes: List<AbsRepository.Mix>,
+) {
+    val isEmpty: Boolean get() = topPicks.isEmpty() && inProgress.isEmpty() && mixes.isEmpty()
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     app: ShelfieApp,
@@ -68,52 +65,44 @@ fun HomeScreen(
     onOpenMix: (String) -> Unit,
 ) {
     var refreshKey by remember { mutableIntStateOf(0) }
-    var isRefreshing by remember { mutableStateOf(false) }
     val progressRevision by app.repository.progressRevision.collectAsState()
-    val ui by produceState<HomeUi>(initialValue = HomeUi.Loading, refreshKey, progressRevision) {
-        val force = refreshKey > 0
-        value = withContext(Dispatchers.IO) {
-            try {
-                if (!app.repository.ensureConfigured()) {
-                    HomeUi.Error("Not logged in")
-                } else {
-                    // The three shelves are independent; fetch them in parallel
-                    // (each is also cached in the repository, so refreshes and
-                    // relaunches paint quickly).
-                    coroutineScope {
-                        val topPicks = async {
-                            runCatching { app.repository.topPicks(forceRefresh = force) }
-                                .getOrDefault(emptyList())
-                        }
-                        val inProgress = async {
-                            runCatching { app.repository.continueListening(limit = 12, forceRefresh = force) }
-                                .getOrDefault(emptyList())
-                        }
-                        val mixes = async {
-                            runCatching { app.repository.madeForYou(forceRefresh = force) }
-                                .getOrDefault(emptyList())
-                        }
-                        HomeUi.Ready(topPicks.await(), inProgress.await(), mixes.await())
-                    }
-                }
-            } catch (e: Exception) {
-                HomeUi.Error(e.message ?: "Failed to load home")
-            }
-        }
-        // Reset here rather than observing ui: an identical refresh result would
-        // not change state and would leave the spinner stuck.
-        isRefreshing = false
-    }
-
-    PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = {
-            isRefreshing = true
-            refreshKey++
+    val shelves = rememberServerData(
+        refetchKey = refreshKey to progressRevision,
+        cached = {
+            HomeShelves(
+                topPicks = app.repository.cachedTopPicks(),
+                inProgress = app.repository.cachedContinueListening(),
+                mixes = app.repository.cachedMixes(),
+            ).takeUnless { it.isEmpty }
         },
-        modifier = Modifier.fillMaxSize(),
+        fetch = {
+            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+            // The three shelves are independent; fetch them in parallel. Mixes
+            // are locally generated, so they only regenerate on an explicit
+            // pull-to-refresh — otherwise they stay stable for the day.
+            coroutineScope {
+                val topPicks = async {
+                    runCatching { app.repository.topPicks(forceRefresh = true) }
+                        .getOrDefault(emptyList())
+                }
+                val inProgress = async {
+                    runCatching { app.repository.continueListening(limit = 12, forceRefresh = true) }
+                        .getOrDefault(emptyList())
+                }
+                val mixes = async {
+                    runCatching { app.repository.madeForYou(forceRefresh = refreshKey > 0) }
+                        .getOrDefault(emptyList())
+                }
+                HomeShelves(topPicks.await(), inProgress.await(), mixes.await())
+            }
+        },
+    )
+
+    RefreshablePage(
+        refreshing = shelves.refreshing,
+        onRefresh = { refreshKey++ },
     ) {
-        HomeContent(app, controller, onOpenPodcast, onOpenMix, ui)
+        HomeContent(app, controller, onOpenPodcast, onOpenMix, shelves)
     }
 }
 
@@ -123,22 +112,23 @@ private fun HomeContent(
     controller: MediaController?,
     onOpenPodcast: (String) -> Unit,
     onOpenMix: (String) -> Unit,
-    ui: HomeUi,
+    shelves: ServerDataState<HomeShelves>,
 ) {
-    when (val state = ui) {
-        is HomeUi.Loading -> {
+    when {
+        shelves.data == null && shelves.error != null -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(shelves.error.orEmpty(), color = MaterialTheme.colorScheme.error)
+            }
+        }
+
+        shelves.data == null -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
 
-        is HomeUi.Error -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(state.message, color = MaterialTheme.colorScheme.error)
-            }
-        }
-
-        is HomeUi.Ready -> {
+        else -> {
+            val state = shelves.data ?: return
             val scope = rememberCoroutineScope()
             val completedDownloads by app.downloads.completed.collectAsState()
             val pins by app.pins.pins.collectAsState()
