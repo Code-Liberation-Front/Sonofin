@@ -60,13 +60,16 @@ class AbsRepository(
     private var latestCache: List<PodcastEpisode> = emptyList()
 
     @Volatile
-    private var songsCache: List<PodcastEpisode> = emptyList()
-
-    @Volatile
     private var topPicksCache: List<LibraryItemSummary> = emptyList()
 
     @Volatile
     private var mixesCache: List<Mix> = emptyList()
+
+    @Volatile
+    private var recentCache: List<InProgressEpisode> = emptyList()
+
+    @Volatile
+    private var recentFetchedAt: Long = 0
 
     @Volatile
     private var librariesCache: List<Library> = emptyList()
@@ -140,9 +143,9 @@ class AbsRepository(
         progressByTrack.clear()
         albumsCache = emptyList()
         latestCache = emptyList()
-        songsCache = emptyList()
         topPicksCache = emptyList()
         mixesCache = emptyList()
+        recentCache = emptyList()
         librariesCache = emptyList()
         settings.clear()
     }
@@ -184,9 +187,10 @@ class AbsRepository(
         settings.saveLibraryId(libraryId)
         albumsCache = emptyList()
         latestCache = emptyList()
-        songsCache = emptyList()
         topPicksCache = emptyList()
         mixesCache = emptyList()
+        recentCache = emptyList()
+        recentFetchedAt = 0
         itemCache.clear()
         progressByTrack.clear()
         runCatching {
@@ -256,14 +260,19 @@ class AbsRepository(
     /** Whole-album resume isn't a music concept; always null. */
     suspend fun bookProgress(itemId: String, maxAgeMs: Long = 30_000): MediaProgress? = null
 
+    @kotlinx.serialization.Serializable
     data class InProgressEpisode(
         val podcast: LibraryItemExpanded,
         val episode: PodcastEpisode,
         val progress: Double,
     )
 
-    /** Most recently played tracks, newest first. */
+    /** Most recently played tracks, newest first. Cached briefly (and on disk). */
     suspend fun continueListening(limit: Int = 15, forceRefresh: Boolean = false): List<InProgressEpisode> {
+        val now = System.currentTimeMillis()
+        if (!forceRefresh && recentCache.isNotEmpty() && now - recentFetchedAt < 60_000) {
+            return recentCache
+        }
         val tracks = runCatching {
             requireApi().items(
                 userId = requireUserId(),
@@ -274,8 +283,12 @@ class AbsRepository(
                 filters = "IsPlayed",
                 limit = limit,
             ).items
-        }.getOrElse { return emptyList() }
-        return tracks.mapNotNull { track ->
+        }.getOrElse {
+            return recentCache.ifEmpty {
+                diskCacheRead<List<InProgressEpisode>>("recent.json") ?: emptyList()
+            }
+        }
+        val result = tracks.mapNotNull { track ->
             val albumId = track.albumId ?: return@mapNotNull null
             val episode = toEpisode(track, albumId)
             val mp = progressByTrack[track.id]
@@ -286,30 +299,47 @@ class AbsRepository(
                 progress = fraction.coerceIn(0.0, 1.0),
             )
         }
+        recentCache = result
+        recentFetchedAt = now
+        diskCacheWrite("recent.json", result)
+        return result
     }
 
     /** Most recently added albums in the library. */
     suspend fun recentlyAdded(limit: Int = 12, forceRefresh: Boolean = false): List<LibraryItemSummary> =
         podcasts(forceRefresh).sortedByDescending { it.addedAt }.take(limit)
 
-    /** Every song in the active library, sorted by name. */
-    suspend fun songs(forceRefresh: Boolean = false): List<PodcastEpisode> {
-        if (!forceRefresh && songsCache.isNotEmpty()) return songsCache
-        val result = try {
-            requireApi().items(
+    data class SongsPage(val songs: List<PodcastEpisode>, val total: Int)
+
+    /**
+     * One page of the library's songs, sorted by name. Fetching the whole
+     * library in one request times out on large servers, so the Songs screen
+     * pages through with StartIndex/Limit as the user scrolls.
+     */
+    suspend fun songsPage(startIndex: Int, limit: Int = 50): SongsPage {
+        return try {
+            val response = requireApi().items(
                 userId = requireUserId(),
                 parentId = activeLibraryId(),
                 includeItemTypes = "Audio",
                 recursive = true,
                 sortBy = "SortName",
                 sortOrder = "Ascending",
-            ).items.map { toEpisode(it, it.albumId ?: "") }
-                .also { diskCacheWrite("songs.json", it) }
+                startIndex = startIndex,
+                limit = limit,
+            )
+            SongsPage(
+                songs = response.items.map { toEpisode(it, it.albumId ?: "") },
+                total = response.totalRecordCount,
+            ).also { if (startIndex == 0) diskCacheWrite("songs_page0.json", it.songs) }
         } catch (e: Exception) {
-            diskCacheRead<List<PodcastEpisode>>("songs.json") ?: throw e
+            if (startIndex == 0) {
+                diskCacheRead<List<PodcastEpisode>>("songs_page0.json")
+                    ?.let { SongsPage(it, it.size) } ?: throw e
+            } else {
+                throw e
+            }
         }
-        songsCache = result
-        return result
     }
 
     /** The albums the user plays most, for the Home "Top Picks" shelf. */
@@ -328,13 +358,19 @@ class AbsRepository(
         }.getOrDefault(emptyList())
         // A fresh library has no play history yet; rotate a daily selection instead.
         val result = played.ifEmpty {
-            podcasts(forceRefresh).shuffled(kotlin.random.Random(daySeed())).take(limit)
+            runCatching { podcasts(forceRefresh) }.getOrDefault(emptyList())
+                .shuffled(kotlin.random.Random(daySeed())).take(limit)
+        }
+        if (result.isEmpty()) {
+            return diskCacheRead<List<LibraryItemSummary>>("toppicks.json") ?: emptyList()
         }
         topPicksCache = result
+        diskCacheWrite("toppicks.json", result)
         return result
     }
 
     /** A generated Apple Music-style mix: a themed queue built from the library. */
+    @kotlinx.serialization.Serializable
     data class Mix(
         val id: String,
         val title: String,
@@ -344,13 +380,31 @@ class AbsRepository(
 
     /**
      * "Made for You" mixes generated locally: one per major genre, artist
-     * essentials to fill, plus a Discovery Mix. Reshuffled daily (stable seed
-     * per day so the shelf doesn't churn while browsing).
+     * essentials to fill, plus a Discovery Mix. Built from a bounded random
+     * sample (not the whole library, which is slow on large servers) and
+     * cached to disk so Home paints instantly on relaunch.
      */
     suspend fun madeForYou(count: Int = 6, forceRefresh: Boolean = false): List<Mix> {
         if (!forceRefresh && mixesCache.isNotEmpty()) return mixesCache
-        val all = runCatching { songs(forceRefresh) }.getOrDefault(emptyList())
-        if (all.isEmpty()) return emptyList()
+        if (!forceRefresh) {
+            diskCacheRead<List<Mix>>("mixes.json")?.takeIf { it.isNotEmpty() }?.let {
+                mixesCache = it
+                return it
+            }
+        }
+        val all = runCatching {
+            requireApi().items(
+                userId = requireUserId(),
+                parentId = activeLibraryId(),
+                includeItemTypes = "Audio",
+                recursive = true,
+                sortBy = "Random",
+                limit = 300,
+            ).items.map { toEpisode(it, it.albumId ?: "") }
+        }.getOrDefault(emptyList())
+        if (all.isEmpty()) {
+            return diskCacheRead<List<Mix>>("mixes.json") ?: emptyList()
+        }
         val seed = daySeed()
         val mixes = mutableListOf<Mix>()
 
@@ -390,6 +444,7 @@ class AbsRepository(
             songs = all.shuffled(kotlin.random.Random(seed)).take(25),
         )
         mixesCache = mixes
+        diskCacheWrite("mixes.json", mixes)
         return mixes
     }
 

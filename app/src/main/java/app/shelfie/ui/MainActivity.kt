@@ -148,13 +148,25 @@ private val BOTTOM_TABS = listOf(
     BottomTab("search", "Search", Icons.Filled.Search),
 )
 
+// Pushed pages that keep the app chrome (top bar + tab bar), like Apple Music.
+private val LIBRARY_SUB_ROUTES = setOf("playlists", "artists", "artist/{name}", "albums", "songs")
+
+/** Which bottom tab a route belongs to, or null for full-screen pages. */
+private fun tabForRoute(route: String?): String? = when {
+    route == null -> null
+    BOTTOM_TABS.any { it.route == route } -> route
+    route in LIBRARY_SUB_ROUTES -> "library"
+    route == "mix/{mixId}" -> "home"
+    else -> null
+}
+
 @Composable
 fun MainNavigation(app: ShelfieApp, controller: MediaController?) {
     val navController = rememberNavController()
     val playerState = rememberPlayerUiState(controller)
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val onTabScreen = BOTTOM_TABS.any { it.route == currentRoute }
+    val selectedTab = tabForRoute(currentRoute)
     val isOnline by rememberIsOnline()
     var playerExpanded by rememberSaveable { mutableStateOf(false) }
 
@@ -166,8 +178,7 @@ fun MainNavigation(app: ShelfieApp, controller: MediaController?) {
             controller = controller,
             navController = navController,
             playerState = playerState,
-            onTabScreen = onTabScreen,
-            currentRoute = currentRoute,
+            selectedTab = selectedTab,
             isOnline = isOnline,
             onExpandPlayer = { playerExpanded = true },
         )
@@ -193,38 +204,40 @@ private fun MainScaffold(
     controller: MediaController?,
     navController: androidx.navigation.NavHostController,
     playerState: PlayerUiState,
-    onTabScreen: Boolean,
-    currentRoute: String?,
+    selectedTab: String?,
     isOnline: Boolean,
     onExpandPlayer: () -> Unit,
 ) {
+    // Tabs and library sub-pages keep the app chrome; the album detail and
+    // settings/downloads pages go full screen.
+    val showChrome = selectedTab != null
     Scaffold(
         topBar = {
             Column {
-                if (onTabScreen) {
+                if (showChrome) {
                     ShelfieTopBar(
                         onSettings = { navController.navigate("settings") { launchSingleTop = true } },
                     )
                 }
                 if (!isOnline) {
-                    OfflineBanner(padStatusBar = !onTabScreen)
+                    OfflineBanner(padStatusBar = !showChrome)
                 }
             }
         },
         bottomBar = {
             // The NavigationBar consumes the gesture-nav inset itself; when it's
             // hidden the now-playing bar must avoid the navigation bar on its own.
-            Column(if (onTabScreen) Modifier else Modifier.navigationBarsPadding()) {
+            Column(if (showChrome) Modifier else Modifier.navigationBarsPadding()) {
                 NowPlayingBar(
                     state = playerState,
                     controller = controller,
                     onExpand = onExpandPlayer,
                 )
-                if (onTabScreen) {
+                if (showChrome) {
                     NavigationBar {
                         BOTTOM_TABS.forEach { tab ->
                             NavigationBarItem(
-                                selected = currentRoute == tab.route,
+                                selected = selectedTab == tab.route,
                                 onClick = {
                                     navController.navigate(tab.route) {
                                         popUpTo("home") { saveState = true }
@@ -241,15 +254,15 @@ private fun MainScaffold(
             }
         },
     ) { padding ->
-        // Non-tab screens have no top bar, and a zero-height topBar slot means the
-        // Scaffold applies no status-bar inset — pad explicitly. When offline the
-        // banner occupies the slot (with its own inset), so skip it then.
+        // Full-screen pages have no top bar, and a zero-height topBar slot means
+        // the Scaffold applies no status-bar inset — pad explicitly. When offline
+        // the banner occupies the slot (with its own inset), so skip it then.
         NavHost(
             navController = navController,
             startDestination = "home",
             modifier = Modifier
                 .padding(padding)
-                .then(if (!onTabScreen && isOnline) Modifier.statusBarsPadding() else Modifier),
+                .then(if (!showChrome && isOnline) Modifier.statusBarsPadding() else Modifier),
         ) {
             composable("home") {
                 if (!isOnline) {
@@ -293,6 +306,7 @@ private fun MainScaffold(
                     app = app,
                     onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
                     onBack = { navController.popBackStack() },
+                    controller = controller,
                 )
             }
             composable("artists") {
@@ -308,6 +322,7 @@ private fun MainScaffold(
                     artistName = entry.arguments?.getString("name").orEmpty(),
                     onBack = { navController.popBackStack() },
                     onOpenAlbum = { itemId -> navController.navigate("podcast/$itemId") },
+                    controller = controller,
                 )
             }
             composable("songs") {

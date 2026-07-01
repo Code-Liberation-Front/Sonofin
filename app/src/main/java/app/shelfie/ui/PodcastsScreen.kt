@@ -25,8 +25,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -54,6 +56,7 @@ fun PodcastsScreen(
     app: ShelfieApp,
     onOpenPodcast: (String) -> Unit,
     onBack: (() -> Unit)? = null,
+    controller: androidx.media3.session.MediaController? = null,
 ) {
     var refreshKey by remember { mutableIntStateOf(0) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -98,7 +101,7 @@ fun PodcastsScreen(
             },
             modifier = Modifier.fillMaxSize(),
         ) {
-            PodcastsContent(app, onOpenPodcast, ui, onRetry = { refreshKey++ })
+            PodcastsContent(app, controller, onOpenPodcast, ui, onRetry = { refreshKey++ })
         }
     }
 }
@@ -106,6 +109,7 @@ fun PodcastsScreen(
 @Composable
 private fun PodcastsContent(
     app: ShelfieApp,
+    controller: androidx.media3.session.MediaController?,
     onOpenPodcast: (String) -> Unit,
     ui: PodcastsUi,
     onRetry: () -> Unit,
@@ -131,6 +135,8 @@ private fun PodcastsContent(
         }
 
         is PodcastsUi.Ready -> {
+            val scope = rememberCoroutineScope()
+            val pins by app.pins.pins.collectAsState()
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 140.dp),
                 contentPadding = PaddingValues(12.dp),
@@ -143,6 +149,7 @@ private fun PodcastsContent(
                         podcast = podcast,
                         coverUrl = app.repository.coverUrl(podcast.id),
                         onClick = { onOpenPodcast(podcast.id) },
+                        actions = albumMenuActions(app, scope, controller, pins, podcast),
                     )
                 }
             }
@@ -151,8 +158,14 @@ private fun PodcastsContent(
 }
 
 @Composable
-private fun PodcastCard(podcast: LibraryItemSummary, coverUrl: String, onClick: () -> Unit) {
-    Column(modifier = Modifier.clickable(onClick = onClick)) {
+private fun PodcastCard(
+    podcast: LibraryItemSummary,
+    coverUrl: String,
+    onClick: () -> Unit,
+    actions: AlbumMenuActions,
+) {
+    AlbumLongPressBox(onClick = onClick, actions = actions) {
+        Column {
         CoverImage(
             model = coverUrl,
             contentDescription = podcast.media.metadata.title,
@@ -175,6 +188,7 @@ private fun PodcastCard(podcast: LibraryItemSummary, coverUrl: String, onClick: 
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
         }
     }
 }

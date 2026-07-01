@@ -88,15 +88,8 @@ fun EpisodesScreen(
         value = withContext(Dispatchers.IO) {
             try {
                 val podcast = app.repository.podcast(itemId)
-                // Album order: disc number, then track number, then title.
                 val rows = podcast.media.episodes
-                    .sortedWith(
-                        compareBy(
-                            { it.season?.toIntOrNull() ?: 0 },
-                            { it.episode?.toIntOrNull() ?: Int.MAX_VALUE },
-                            { it.title.orEmpty() },
-                        ),
-                    )
+                    .sortedByAlbumOrder()
                     .map { episode ->
                         val progress = runCatching {
                             app.repository.progress(itemId, episode.id)

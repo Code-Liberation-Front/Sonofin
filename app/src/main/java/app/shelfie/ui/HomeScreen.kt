@@ -45,6 +45,8 @@ import app.shelfie.data.AbsRepository
 import app.shelfie.data.LibraryItemSummary
 import app.shelfie.playlist.PlaylistEntry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 private sealed interface HomeUi {
@@ -75,13 +77,24 @@ fun HomeScreen(
                 if (!app.repository.ensureConfigured()) {
                     HomeUi.Error("Not logged in")
                 } else {
-                    HomeUi.Ready(
-                        topPicks = runCatching { app.repository.topPicks(forceRefresh = force) }
-                            .getOrDefault(emptyList()),
-                        inProgress = app.repository.continueListening(limit = 12, forceRefresh = force),
-                        mixes = runCatching { app.repository.madeForYou(forceRefresh = force) }
-                            .getOrDefault(emptyList()),
-                    )
+                    // The three shelves are independent; fetch them in parallel
+                    // (each is also cached in the repository, so refreshes and
+                    // relaunches paint quickly).
+                    coroutineScope {
+                        val topPicks = async {
+                            runCatching { app.repository.topPicks(forceRefresh = force) }
+                                .getOrDefault(emptyList())
+                        }
+                        val inProgress = async {
+                            runCatching { app.repository.continueListening(limit = 12, forceRefresh = force) }
+                                .getOrDefault(emptyList())
+                        }
+                        val mixes = async {
+                            runCatching { app.repository.madeForYou(forceRefresh = force) }
+                                .getOrDefault(emptyList())
+                        }
+                        HomeUi.Ready(topPicks.await(), inProgress.await(), mixes.await())
+                    }
                 }
             } catch (e: Exception) {
                 HomeUi.Error(e.message ?: "Failed to load home")
@@ -160,6 +173,7 @@ private fun HomeContent(
                                     album = album,
                                     coverUrl = app.repository.coverUrl(album.id),
                                     onClick = { onOpenPodcast(album.id) },
+                                    actions = albumMenuActions(app, scope, controller, pins, album),
                                 )
                             }
                         }
@@ -322,13 +336,11 @@ private fun TopPickCard(
     album: LibraryItemSummary,
     coverUrl: String,
     onClick: () -> Unit,
+    actions: AlbumMenuActions,
 ) {
-    Column(
-        modifier = Modifier
-            .width(180.dp)
-            .clickable(onClick = onClick),
-    ) {
-        CoverImage(
+    AlbumLongPressBox(onClick = onClick, actions = actions, modifier = Modifier.width(180.dp)) {
+        Column {
+            CoverImage(
             model = coverUrl,
             contentDescription = album.media.metadata.title,
             contentScale = ContentScale.Crop,
@@ -352,6 +364,7 @@ private fun TopPickCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
         }
     }
 }

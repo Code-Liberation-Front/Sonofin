@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +65,7 @@ fun LibraryScreen(
     onOpenSongs: () -> Unit,
     onOpenPlaylists: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     val pins by app.pins.pins.collectAsState()
     val recentlyAdded by produceState(initialValue = emptyList<LibraryItemSummary>()) {
         value = withContext(Dispatchers.IO) {
@@ -141,6 +143,7 @@ fun LibraryScreen(
                             coverUrl = app.repository.coverUrl(album.id),
                             onClick = { onOpenAlbum(album.id) },
                             modifier = Modifier.weight(1f),
+                            actions = albumMenuActions(app, scope, controller, pins, album),
                         )
                     }
                     if (pair.size == 1) Box(Modifier.weight(1f))

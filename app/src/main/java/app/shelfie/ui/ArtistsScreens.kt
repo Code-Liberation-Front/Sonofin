@@ -24,8 +24,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -153,6 +155,7 @@ fun ArtistDetailScreen(
     artistName: String,
     onBack: () -> Unit,
     onOpenAlbum: (String) -> Unit,
+    controller: androidx.media3.session.MediaController? = null,
 ) {
     val ui by produceState<ArtistsUiDetail>(initialValue = ArtistsUiDetail.Loading, artistName) {
         value = withContext(Dispatchers.IO) {
@@ -181,6 +184,8 @@ fun ArtistDetailScreen(
         }
 
         is ArtistsUiDetail.Ready -> {
+            val scope = rememberCoroutineScope()
+            val pins by app.pins.pins.collectAsState()
             LazyColumn(Modifier.fillMaxSize()) {
                 item {
                     Column(Modifier.padding(horizontal = 16.dp)) {
@@ -210,6 +215,7 @@ fun ArtistDetailScreen(
                                 coverUrl = app.repository.coverUrl(album.id),
                                 onClick = { onOpenAlbum(album.id) },
                                 modifier = Modifier.weight(1f),
+                                actions = albumMenuActions(app, scope, controller, pins, album),
                             )
                         }
                         if (pair.size == 1) Box(Modifier.weight(1f))
@@ -233,32 +239,40 @@ fun AlbumGridCard(
     coverUrl: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    actions: AlbumMenuActions? = null,
 ) {
-    Column(modifier.clickable(onClick = onClick)) {
-        CoverImage(
-            model = coverUrl,
-            contentDescription = album.media.metadata.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(10.dp)),
-        )
-        Text(
-            album.media.metadata.title ?: "Album",
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-        album.media.metadata.displayAuthor?.let {
+    val content: @Composable () -> Unit = {
+        Column {
+            CoverImage(
+                model = coverUrl,
+                contentDescription = album.media.metadata.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(10.dp)),
+            )
             Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                album.media.metadata.title ?: "Album",
+                style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 6.dp),
             )
+            album.media.metadata.displayAuthor?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
+    }
+    if (actions != null) {
+        AlbumLongPressBox(onClick = onClick, actions = actions, modifier = modifier) { content() }
+    } else {
+        Box(modifier.clickable(onClick = onClick)) { content() }
     }
 }

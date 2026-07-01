@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
@@ -23,8 +25,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -37,18 +42,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.session.MediaController
 import app.shelfie.ShelfieApp
+import app.shelfie.data.AbsRepository
 import app.shelfie.data.PodcastEpisode
 import app.shelfie.playlist.PlaylistEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private sealed interface SongListUi {
-    data object Loading : SongListUi
-    data class Error(val message: String) : SongListUi
-    data class Ready(val title: String, val subtitle: String, val songs: List<PodcastEpisode>) : SongListUi
-}
+private const val SONGS_PAGE_SIZE = 50
 
-/** Apple Music-style "Songs" page: every song in the library. */
+/**
+ * Apple Music-style "Songs" page. Large libraries can't be fetched in one
+ * request, so this loads a page at a time and fetches the next page as the
+ * user scrolls near the end of the list.
+ */
 @Composable
 fun SongsScreen(
     app: ShelfieApp,
@@ -57,21 +63,90 @@ fun SongsScreen(
     onBack: () -> Unit,
     onOpenAlbum: (String) -> Unit,
 ) {
-    val ui by produceState<SongListUi>(initialValue = SongListUi.Loading) {
-        value = withContext(Dispatchers.IO) {
-            try {
-                if (!app.repository.ensureConfigured()) {
-                    SongListUi.Error("Not logged in")
-                } else {
-                    val songs = app.repository.songs()
-                    SongListUi.Ready("Songs", "${songs.size} songs", songs)
-                }
-            } catch (e: Exception) {
-                SongListUi.Error(e.message ?: "Failed to load songs")
+    var songs by remember { mutableStateOf<List<PodcastEpisode>>(emptyList()) }
+    var total by remember { mutableIntStateOf(0) }
+    var initialLoading by remember { mutableStateOf(true) }
+    var loadingMore by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    suspend fun loadPage(startIndex: Int) {
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+                app.repository.songsPage(startIndex, SONGS_PAGE_SIZE)
             }
         }
+        result.fold(
+            onSuccess = { page ->
+                // Pages can overlap after a refresh; de-dup by song id.
+                val merged = (songs + page.songs).distinctBy { it.id }
+                songs = merged
+                total = page.total
+                error = null
+            },
+            onFailure = { e ->
+                if (songs.isEmpty()) error = e.message ?: "Failed to load songs"
+            },
+        )
     }
-    SongListContent(app, controller, playerState, ui, onBack, onOpenAlbum)
+
+    LaunchedEffect(Unit) {
+        loadPage(0)
+        initialLoading = false
+    }
+
+    val listState = rememberLazyListState()
+    val nearEnd by remember {
+        derivedStateOf {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            lastVisible >= listState.layoutInfo.totalItemsCount - 8
+        }
+    }
+    LaunchedEffect(nearEnd, songs.size) {
+        if (nearEnd && !initialLoading && !loadingMore && songs.isNotEmpty() && songs.size < total) {
+            loadingMore = true
+            loadPage(songs.size)
+            loadingMore = false
+        }
+    }
+
+    when {
+        initialLoading -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+
+        error != null && songs.isEmpty() -> {
+            Column(
+                Modifier.fillMaxSize().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+            }
+        }
+
+        else -> {
+            val subtitle = if (songs.size < total) {
+                "${songs.size} of $total songs"
+            } else {
+                "${songs.size} songs"
+            }
+            SongListView(
+                app = app,
+                controller = controller,
+                playerState = playerState,
+                title = "Songs",
+                subtitle = subtitle,
+                songs = songs,
+                onBack = onBack,
+                onOpenAlbum = onOpenAlbum,
+                listState = listState,
+                loadingMore = loadingMore,
+            )
+        }
+    }
 }
 
 /** A generated "Made for You" mix, played from the Home tab. */
@@ -84,156 +159,172 @@ fun MixScreen(
     onBack: () -> Unit,
     onOpenAlbum: (String) -> Unit,
 ) {
-    val ui by produceState<SongListUi>(initialValue = SongListUi.Loading, mixId) {
+    val mixState by produceState<Result<AbsRepository.Mix?>?>(initialValue = null, mixId) {
         value = withContext(Dispatchers.IO) {
-            try {
-                if (!app.repository.ensureConfigured()) {
-                    SongListUi.Error("Not logged in")
-                } else {
-                    val mix = app.repository.mix(mixId)
-                    if (mix == null) {
-                        SongListUi.Error("This mix is no longer available")
-                    } else {
-                        SongListUi.Ready(mix.title, mix.subtitle, mix.songs)
-                    }
-                }
-            } catch (e: Exception) {
-                SongListUi.Error(e.message ?: "Failed to load mix")
+            runCatching {
+                if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+                app.repository.mix(mixId)
             }
         }
     }
-    SongListContent(app, controller, playerState, ui, onBack, onOpenAlbum)
-}
 
-@Composable
-private fun SongListContent(
-    app: ShelfieApp,
-    controller: MediaController?,
-    playerState: PlayerUiState,
-    ui: SongListUi,
-    onBack: () -> Unit,
-    onOpenAlbum: (String) -> Unit,
-) {
-    when (val state = ui) {
-        is SongListUi.Loading -> {
+    when {
+        mixState == null -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
 
-        is SongListUi.Error -> {
-            Column(
-                Modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(state.message, color = MaterialTheme.colorScheme.error)
+        mixState?.isFailure == true || mixState?.getOrNull() == null -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    mixState?.exceptionOrNull()?.message ?: "This mix is no longer available",
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
 
-        is SongListUi.Ready -> {
-            val scope = rememberCoroutineScope()
-            val completedDownloads by app.downloads.completed.collectAsState()
-            val activeDownloads by app.downloads.active.collectAsState()
-            val pins by app.pins.pins.collectAsState()
-            var pickerEntry by remember { mutableStateOf<PlaylistEntry?>(null) }
+        else -> {
+            val mix = mixState?.getOrNull() ?: return
+            SongListView(
+                app = app,
+                controller = controller,
+                playerState = playerState,
+                title = mix.title,
+                subtitle = mix.subtitle,
+                songs = mix.songs,
+                onBack = onBack,
+                onOpenAlbum = onOpenAlbum,
+            )
+        }
+    }
+}
 
-            pickerEntry?.let { entry ->
-                PlaylistPickerDialog(app = app, entry = entry, onDismiss = { pickerEntry = null })
-            }
+@Composable
+private fun SongListView(
+    app: ShelfieApp,
+    controller: MediaController?,
+    playerState: PlayerUiState,
+    title: String,
+    subtitle: String,
+    songs: List<PodcastEpisode>,
+    onBack: () -> Unit,
+    onOpenAlbum: (String) -> Unit,
+    listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
+    loadingMore: Boolean = false,
+) {
+    val scope = rememberCoroutineScope()
+    val completedDownloads by app.downloads.completed.collectAsState()
+    val activeDownloads by app.downloads.active.collectAsState()
+    val pins by app.pins.pins.collectAsState()
+    var pickerEntry by remember { mutableStateOf<PlaylistEntry?>(null) }
 
-            LazyColumn(Modifier.fillMaxSize()) {
-                item {
-                    Column(Modifier.padding(horizontal = 16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                            }
-                        }
-                        Text(state.title, style = MaterialTheme.typography.headlineMedium)
-                        if (state.subtitle.isNotBlank()) {
-                            Text(
-                                state.subtitle,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        PlayShuffleButtons(
-                            enabled = state.songs.isNotEmpty(),
-                            onPlay = { controller?.playSongs(state.songs) },
-                            onShuffle = { controller?.playSongs(state.songs.shuffled()) },
-                        )
+    pickerEntry?.let { entry ->
+        PlaylistPickerDialog(app = app, entry = entry, onDismiss = { pickerEntry = null })
+    }
+
+    LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+        item {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
-                itemsIndexed(state.songs, key = { _, s -> s.id }) { index, song ->
-                    val itemId = song.libraryItemId
-                    val durationSec = (song.audioTrack?.duration ?: song.audioFile?.duration ?: 0.0)
-                    val isDownloaded = completedDownloads.any {
-                        it.itemId == itemId && it.episodeId == song.id
-                    }
-                    val isCurrent = playerState.mediaId == episodeMediaId(itemId, song.id)
-                    EpisodeLongPressBox(
-                        onClick = {
-                            controller?.let { c ->
-                                if (isCurrent) {
-                                    if (c.isPlaying) c.pause() else c.play()
-                                } else {
-                                    c.playSongs(state.songs, index)
-                                }
-                            }
-                        },
-                        actions = EpisodeMenuActions(
-                            isFinished = false,
-                            isDownloaded = isDownloaded,
-                            isPinned = isSongPinned(pins, itemId, song.id),
-                            onPlayNext = { controller?.playNext(itemId, song.id) },
-                            onTogglePin = {
-                                togglePinnedSong(
-                                    app, itemId, song.id,
-                                    title = song.title ?: "Song",
-                                    subtitle = song.subtitle.orEmpty(),
-                                )
-                            },
-                            onResetProgress = {
-                                resetEpisodeProgress(app, scope, itemId, song.id, durationSec)
-                            },
-                            onToggleFinished = {
-                                setEpisodeFinished(app, scope, itemId, song.id, finished = true, durationSec = durationSec)
-                            },
-                            onAddToPlaylist = {
-                                pickerEntry = PlaylistEntry(
-                                    itemId = itemId,
-                                    episodeId = song.id,
-                                    title = song.title ?: "Song",
-                                    podcastTitle = song.subtitle.orEmpty(),
-                                )
-                            },
-                            onGoToPodcast = itemId.takeIf { it.isNotBlank() }?.let { { onOpenAlbum(it) } },
-                            onToggleDownload = {
-                                toggleEpisodeDownload(app, scope, itemId, song.id, isDownloaded)
-                            },
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                        ) {
-                            EpisodeRowContent(
-                                coverUrl = app.repository.coverUrl(itemId),
-                                title = song.title ?: "Song",
-                                subtitle = song.subtitle,
-                                dateLine = formatDuration(durationSec.toLong()),
-                                progressFraction = 0f,
-                                completed = false,
-                                titleColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified,
-                                downloadUi = downloadUiFor(app, activeDownloads, completedDownloads, itemId, song.id),
-                            )
+                Text(title, style = MaterialTheme.typography.headlineMedium)
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                PlayShuffleButtons(
+                    enabled = songs.isNotEmpty(),
+                    onPlay = { controller?.playSongs(songs) },
+                    onShuffle = { controller?.playSongs(songs.shuffled()) },
+                )
+            }
+        }
+        itemsIndexed(songs, key = { _, s -> s.id }) { index, song ->
+            val itemId = song.libraryItemId
+            val durationSec = (song.audioTrack?.duration ?: song.audioFile?.duration ?: 0.0)
+            val isDownloaded = completedDownloads.any {
+                it.itemId == itemId && it.episodeId == song.id
+            }
+            val isCurrent = playerState.mediaId == episodeMediaId(itemId, song.id)
+            EpisodeLongPressBox(
+                onClick = {
+                    controller?.let { c ->
+                        if (isCurrent) {
+                            if (c.isPlaying) c.pause() else c.play()
+                        } else {
+                            c.playSongs(songs, index)
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                },
+                actions = EpisodeMenuActions(
+                    isFinished = false,
+                    isDownloaded = isDownloaded,
+                    isPinned = isSongPinned(pins, itemId, song.id),
+                    onPlayNext = { controller?.playNext(itemId, song.id) },
+                    onTogglePin = {
+                        togglePinnedSong(
+                            app, itemId, song.id,
+                            title = song.title ?: "Song",
+                            subtitle = song.subtitle.orEmpty(),
+                        )
+                    },
+                    onResetProgress = {
+                        resetEpisodeProgress(app, scope, itemId, song.id, durationSec)
+                    },
+                    onToggleFinished = {
+                        setEpisodeFinished(app, scope, itemId, song.id, finished = true, durationSec = durationSec)
+                    },
+                    onAddToPlaylist = {
+                        pickerEntry = PlaylistEntry(
+                            itemId = itemId,
+                            episodeId = song.id,
+                            title = song.title ?: "Song",
+                            podcastTitle = song.subtitle.orEmpty(),
+                        )
+                    },
+                    onGoToPodcast = itemId.takeIf { it.isNotBlank() }?.let { { onOpenAlbum(it) } },
+                    onToggleDownload = {
+                        toggleEpisodeDownload(app, scope, itemId, song.id, isDownloaded)
+                    },
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    EpisodeRowContent(
+                        coverUrl = app.repository.coverUrl(itemId),
+                        title = song.title ?: "Song",
+                        subtitle = song.subtitle,
+                        dateLine = formatDuration(durationSec.toLong()),
+                        progressFraction = 0f,
+                        completed = false,
+                        titleColor = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                        downloadUi = downloadUiFor(app, activeDownloads, completedDownloads, itemId, song.id),
+                    )
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+        }
+        if (loadingMore) {
+            item {
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                 }
             }
         }
