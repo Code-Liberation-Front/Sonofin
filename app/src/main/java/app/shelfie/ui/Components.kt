@@ -56,6 +56,7 @@ import app.shelfie.ShelfieApp
 import app.shelfie.data.PodcastEpisode
 import app.shelfie.download.ActiveDownload
 import app.shelfie.download.DownloadedEpisode
+import app.shelfie.pin.PinnedItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -457,7 +458,7 @@ fun togglePinnedSong(
     subtitle: String,
 ) {
     app.pins.toggle(
-        app.shelfie.pin.PinnedItem(
+        PinnedItem(
             kind = "song",
             id = itemId,
             songId = episodeId,
@@ -468,7 +469,7 @@ fun togglePinnedSong(
 }
 
 /** Whether a song is pinned, given the collected pin list. */
-fun isSongPinned(pins: List<app.shelfie.pin.PinnedItem>, itemId: String, episodeId: String): Boolean =
+fun isSongPinned(pins: List<PinnedItem>, itemId: String, episodeId: String): Boolean =
     pins.any { it.kind == "song" && it.id == itemId && it.songId == episodeId }
 
 /** Downloads an episode for offline use, or removes the local copy. */
