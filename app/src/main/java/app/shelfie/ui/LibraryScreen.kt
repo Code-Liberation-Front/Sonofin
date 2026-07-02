@@ -72,14 +72,17 @@ fun LibraryScreen(
         refreshKey = refreshKey,
         sessionKey = "library",
         cached = {
-            app.repository.cachedAlbums()
-                .sortedByDescending { it.addedAt }
-                .take(12)
+            app.repository.cachedRecentlyAdded()
+                .ifEmpty {
+                    app.repository.cachedAlbums()
+                        .sortedByDescending { it.addedAt }
+                        .take(26)
+                }
                 .ifEmpty { null }
         },
         fetch = {
             if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
-            app.repository.recentlyAdded(12, forceRefresh = true)
+            app.repository.recentlyAdded(26, forceRefresh = true)
         },
     )
     val recentlyAdded = recentState.data.orEmpty()

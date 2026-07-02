@@ -72,6 +72,9 @@ class AbsRepository(
     private var recentFetchedAt: Long = 0
 
     @Volatile
+    private var recentAddedCache: List<LibraryItemSummary> = emptyList()
+
+    @Volatile
     private var librariesCache: List<Library> = emptyList()
 
     // Bumped whenever progress is changed from the UI (reset / mark played),
@@ -146,6 +149,7 @@ class AbsRepository(
         topPicksCache = emptyList()
         mixesCache = emptyList()
         recentCache = emptyList()
+        recentAddedCache = emptyList()
         librariesCache = emptyList()
         settings.clear()
     }
@@ -191,6 +195,7 @@ class AbsRepository(
         mixesCache = emptyList()
         recentCache = emptyList()
         recentFetchedAt = 0
+        recentAddedCache = emptyList()
         itemCache.clear()
         progressByTrack.clear()
         runCatching {
@@ -305,9 +310,30 @@ class AbsRepository(
         return result
     }
 
-    /** Most recently added albums in the library. */
-    suspend fun recentlyAdded(limit: Int = 12, forceRefresh: Boolean = false): List<LibraryItemSummary> =
-        podcasts(forceRefresh).sortedByDescending { it.addedAt }.take(limit)
+    /**
+     * Most recently added albums, via a dedicated small query (DateCreated
+     * descending) — fetching the entire album library just to show this shelf
+     * is slow on large servers.
+     */
+    suspend fun recentlyAdded(limit: Int = 26, forceRefresh: Boolean = false): List<LibraryItemSummary> {
+        if (!forceRefresh && recentAddedCache.isNotEmpty()) return recentAddedCache
+        val result = try {
+            requireApi().items(
+                userId = requireUserId(),
+                parentId = activeLibraryId(),
+                includeItemTypes = "MusicAlbum",
+                recursive = true,
+                sortBy = "DateCreated",
+                sortOrder = "Descending",
+                limit = limit,
+            ).items.map { it.toSummary() }
+                .also { diskCacheWrite("recent_albums.json", it) }
+        } catch (e: Exception) {
+            diskCacheRead<List<LibraryItemSummary>>("recent_albums.json") ?: throw e
+        }
+        recentAddedCache = result
+        return result
+    }
 
     data class SongsPage(val songs: List<PodcastEpisode>, val total: Int)
 
@@ -482,6 +508,9 @@ class AbsRepository(
 
     fun cachedAlbums(): List<LibraryItemSummary> =
         albumsCache.ifEmpty { diskCacheRead<List<LibraryItemSummary>>("albums.json").orEmpty() }
+
+    fun cachedRecentlyAdded(): List<LibraryItemSummary> =
+        recentAddedCache.ifEmpty { diskCacheRead<List<LibraryItemSummary>>("recent_albums.json").orEmpty() }
 
     fun cachedTopPicks(): List<LibraryItemSummary> =
         topPicksCache.ifEmpty { diskCacheRead<List<LibraryItemSummary>>("toppicks.json").orEmpty() }
