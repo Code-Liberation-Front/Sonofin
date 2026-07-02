@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
@@ -45,10 +46,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private data class SearchResults(
+    val artists: List<ArtistRow>,
     val podcasts: List<LibraryItemSummary>,
     val episodes: List<Pair<LibraryItemExpanded, PodcastEpisode>>,
 ) {
-    val isEmpty: Boolean get() = podcasts.isEmpty() && episodes.isEmpty()
+    val isEmpty: Boolean get() = artists.isEmpty() && podcasts.isEmpty() && episodes.isEmpty()
 }
 
 @Composable
@@ -57,21 +59,25 @@ fun SearchScreen(
     controller: MediaController?,
     onOpenPodcast: (String) -> Unit,
     onBack: () -> Unit,
+    showBack: Boolean = true,
+    onOpenArtist: (String) -> Unit = {},
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
+    var refreshKey by remember { mutableIntStateOf(0) }
     var results by remember { mutableStateOf<SearchResults?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val completedDownloads by app.downloads.completed.collectAsState()
     val activeDownloads by app.downloads.active.collectAsState()
+    val pins by app.pins.pins.collectAsState()
     var pickerEntry by remember { mutableStateOf<PlaylistEntry?>(null) }
 
     pickerEntry?.let { entry ->
         PlaylistPickerDialog(app = app, entry = entry, onDismiss = { pickerEntry = null })
     }
 
-    LaunchedEffect(query) {
+    LaunchedEffect(query, refreshKey) {
         error = null
         if (query.isBlank()) {
             results = null
@@ -79,15 +85,20 @@ fun SearchScreen(
             return@LaunchedEffect
         }
         searching = true
-        delay(400) // debounce typing
+        if (refreshKey == 0) delay(400) // debounce typing; refreshes run immediately
         val outcome = withContext(Dispatchers.IO) {
             runCatching {
                 val (podcasts, episodes) = app.repository.search(query)
-                SearchResults(podcasts, episodes)
+                // Artist matches come from grouping the album library locally.
+                val albums = app.repository.cachedAlbums()
+                    .ifEmpty { runCatching { app.repository.podcasts() }.getOrDefault(emptyList()) }
+                val artists = artistsFromAlbums(albums)
+                    .filter { it.name.contains(query.trim(), ignoreCase = true) }
+                SearchResults(artists, podcasts, episodes)
             }
         }
         outcome.fold(
-            onSuccess = { results = it },
+            onSuccess = { fresh -> if (fresh != results) results = fresh },
             onFailure = { error = it.message ?: "Search failed" },
         )
         searching = false
@@ -100,20 +111,26 @@ fun SearchScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 8.dp),
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            if (showBack) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
             }
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Search podcasts and episodes") },
+                placeholder = { Text("Search albums and songs") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
         }
 
+        RefreshablePage(
+            refreshing = searching && results != null,
+            onRefresh = { if (query.isNotBlank()) refreshKey++ },
+        ) {
         when {
-            searching -> {
+            searching && results == null -> {
                 Row(
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -138,14 +155,23 @@ fun SearchScreen(
                 )
             }
 
-            results != null -> {
-                val found = results ?: return@Column
+            else -> results?.let { found ->
                 LazyColumn(Modifier.fillMaxSize()) {
+                    if (found.artists.isNotEmpty()) {
+                        item { SearchSectionTitle("Artists") }
+                        items(found.artists, key = { "a:${it.name}" }) { artist ->
+                            ArtistResultRow(
+                                artist = artist,
+                                coverUrl = app.repository.coverUrl(artist.coverAlbumId),
+                                onClick = { onOpenArtist(artist.name) },
+                            )
+                        }
+                    }
                     if (found.podcasts.isNotEmpty()) {
-                        item { SearchSectionTitle("Podcasts") }
+                        item { SearchSectionTitle("Albums") }
                         items(found.podcasts, key = { "p:${it.id}" }) { podcast ->
                             PodcastResultRow(
-                                title = podcast.media.metadata.title ?: "Podcast",
+                                title = podcast.media.metadata.title ?: "Album",
                                 author = podcast.media.metadata.author ?: "",
                                 coverUrl = app.repository.coverUrl(podcast.id),
                                 onClick = { onOpenPodcast(podcast.id) },
@@ -153,7 +179,7 @@ fun SearchScreen(
                         }
                     }
                     if (found.episodes.isNotEmpty()) {
-                        item { SearchSectionTitle("Episodes") }
+                        item { SearchSectionTitle("Songs") }
                         items(found.episodes, key = { "e:${it.second.id}" }) { (podcast, episode) ->
                             val itemId = podcast.id
                             val durationSec = (episode.audioTrack?.duration ?: episode.audioFile?.duration ?: 0.0)
@@ -166,19 +192,21 @@ fun SearchScreen(
                                 coverUrl = app.repository.coverUrl(itemId),
                                 downloadUi = downloadUiFor(app, activeDownloads, completedDownloads, itemId, episode.id),
                                 actions = EpisodeMenuActions(
-                                    isFinished = false,
                                     isDownloaded = isDownloaded,
-                                    onResetProgress = {
-                                        resetEpisodeProgress(app, scope, itemId, episode.id, durationSec)
-                                    },
-                                    onToggleFinished = {
-                                        setEpisodeFinished(app, scope, itemId, episode.id, finished = true, durationSec = durationSec)
+                                    isPinned = isSongPinned(pins, itemId, episode.id),
+                                    onPlayNext = { controller?.playNext(itemId, episode.id) },
+                                    onTogglePin = {
+                                        togglePinnedSong(
+                                            app, itemId, episode.id,
+                                            title = episode.title ?: "Song",
+                                            subtitle = podcast.media.metadata.title.orEmpty(),
+                                        )
                                     },
                                     onAddToPlaylist = {
                                         pickerEntry = PlaylistEntry(
                                             itemId = itemId,
                                             episodeId = episode.id,
-                                            title = episode.title ?: "Episode",
+                                            title = episode.title ?: "Song",
                                             podcastTitle = podcast.media.metadata.title ?: "",
                                         )
                                     },
@@ -194,6 +222,7 @@ fun SearchScreen(
                 }
             }
         }
+        }
     }
 }
 
@@ -205,6 +234,39 @@ private fun SearchSectionTitle(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
     )
+}
+
+@Composable
+private fun ArtistResultRow(artist: ArtistRow, coverUrl: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        CoverImage(
+            model = coverUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape),
+        )
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(
+                artist.name,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (artist.albumCount == 1) "Artist • 1 album" else "Artist • ${artist.albumCount} albums",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable
@@ -269,7 +331,7 @@ private fun EpisodeResultRow(
         ) {
             EpisodeRowContent(
                 coverUrl = coverUrl,
-                title = episode.title ?: "Episode",
+                title = episode.title ?: "Song",
                 subtitle = podcastTitle,
                 dateLine = dateLine,
                 progressFraction = 0f,

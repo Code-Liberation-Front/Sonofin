@@ -97,6 +97,24 @@ class PlaylistStore(context: Context) {
             playlist.entries.any { it.itemId == itemId && it.episodeId == episodeId }
         }
 
+    /** The Favorites playlist id, creating the playlist on first use. */
+    fun favoritesId(): String =
+        _playlists.value.firstOrNull { it.name == FAVORITES_NAME }?.id ?: create(FAVORITES_NAME)
+
+    /** Adds the song to Favorites, or removes it if already there. */
+    fun toggleFavorite(entry: PlaylistEntry) {
+        toggleIn(favoritesId(), entry)
+    }
+
+    companion object {
+        const val FAVORITES_NAME = "Favorites"
+
+        /** Whether the song is in the Favorites playlist, given a collected list. */
+        fun isFavorite(playlists: List<UserPlaylist>, itemId: String, episodeId: String): Boolean =
+            playlists.firstOrNull { it.name == FAVORITES_NAME }
+                ?.entries?.any { it.itemId == itemId && it.episodeId == episodeId } == true
+    }
+
     @Synchronized
     private fun update(playlists: List<UserPlaylist>) {
         _playlists.value = playlists

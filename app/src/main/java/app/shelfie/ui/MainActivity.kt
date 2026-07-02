@@ -2,7 +2,6 @@ package app.shelfie.ui
 
 import android.Manifest
 import android.content.ComponentName
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -27,11 +26,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
+import android.net.Uri
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.PlaylistPlay
-import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,7 +53,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.navigation.compose.NavHost
@@ -68,7 +65,6 @@ import app.shelfie.playback.PlaybackService
 import app.shelfie.ui.theme.ShelfieTheme
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
-import kotlinx.coroutines.launch
 
 // AppCompatActivity (a FragmentActivity) is required for the Cast chooser dialog.
 class MainActivity : AppCompatActivity() {
@@ -89,43 +85,6 @@ class MainActivity : AppCompatActivity() {
                 val controller by controllerState
                 val error by loginError
                 ShelfieRoot(app = app, controller = controller, loginError = error)
-            }
-        }
-        handleOidcIntent(intent)
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleOidcIntent(intent)
-    }
-
-    /** Finishes the OIDC login when the browser redirects back to audiobookshelf://oauth. */
-    private fun handleOidcIntent(intent: Intent?) {
-        val data = intent?.data ?: return
-        if (data.scheme != "audiobookshelf" || data.host != "oauth") return
-        val code = data.getQueryParameter("code")
-        val state = data.getQueryParameter("state")
-        if (code.isNullOrBlank() || state.isNullOrBlank()) {
-            loginError.value = "Sign-in was cancelled or the server returned no code."
-            return
-        }
-        loginError.value = null
-        val app = application as ShelfieApp
-        lifecycleScope.launch {
-            try {
-                app.repository.completeOidcLogin(code, state)
-            } catch (e: Exception) {
-                loginError.value = if (e is retrofit2.HttpException && e.code() == 400) {
-                    val serverMessage = runCatching {
-                        e.response()?.errorBody()?.string()?.take(200)?.trim()
-                    }.getOrNull().orEmpty()
-                    val detail = if (serverMessage.isNotBlank()) " — $serverMessage" else ""
-                    "Sign-in rejected by the server (HTTP 400$detail). If this mentions the " +
-                        "redirect URI, add audiobookshelf://oauth to \"Allowed Mobile Redirect " +
-                        "URIs\" in Audiobookshelf Settings → Authentication."
-                } else {
-                    e.message ?: "OIDC sign-in failed"
-                }
             }
         }
     }
@@ -182,12 +141,32 @@ fun ShelfieRoot(app: ShelfieApp, controller: MediaController?, loginError: Strin
 
 private data class BottomTab(val route: String, val label: String, val icon: ImageVector)
 
+// Apple Music-style tabs.
 private val BOTTOM_TABS = listOf(
     BottomTab("home", "Home", Icons.Filled.Home),
-    BottomTab("latest", "Latest", Icons.Filled.Schedule),
-    BottomTab("library", "Library", Icons.Filled.GridView),
-    BottomTab("playlist", "Playlist", Icons.Filled.PlaylistPlay),
+    BottomTab("library", "Library", Icons.Filled.LibraryMusic),
+    BottomTab("search", "Search", Icons.Filled.Search),
 )
+
+// Pushed pages that keep the app chrome (top bar + tab bar), like Apple Music.
+private val LIBRARY_SUB_ROUTES = setOf(
+    "playlists",
+    "playlist/{playlistId}",
+    "artists",
+    "artist/{name}",
+    "albums",
+    "songs",
+    "podcast/{itemId}",
+)
+
+/** Which bottom tab a route belongs to, or null for full-screen pages. */
+private fun tabForRoute(route: String?): String? = when {
+    route == null -> null
+    BOTTOM_TABS.any { it.route == route } -> route
+    route in LIBRARY_SUB_ROUTES -> "library"
+    route == "mix/{mixId}" -> "home"
+    else -> null
+}
 
 @Composable
 fun MainNavigation(app: ShelfieApp, controller: MediaController?) {
@@ -195,7 +174,7 @@ fun MainNavigation(app: ShelfieApp, controller: MediaController?) {
     val playerState = rememberPlayerUiState(controller)
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val onTabScreen = BOTTOM_TABS.any { it.route == currentRoute }
+    val selectedTab = tabForRoute(currentRoute)
     val isOnline by rememberIsOnline()
     var playerExpanded by rememberSaveable { mutableStateOf(false) }
 
@@ -207,8 +186,7 @@ fun MainNavigation(app: ShelfieApp, controller: MediaController?) {
             controller = controller,
             navController = navController,
             playerState = playerState,
-            onTabScreen = onTabScreen,
-            currentRoute = currentRoute,
+            selectedTab = selectedTab,
             isOnline = isOnline,
             onExpandPlayer = { playerExpanded = true },
         )
@@ -220,9 +198,18 @@ fun MainNavigation(app: ShelfieApp, controller: MediaController?) {
             exit = slideOutVertically(animationSpec = tween(300), targetOffsetY = { it }),
         ) {
             PlayerScreen(
+                app = app,
                 state = playerState,
                 controller = controller,
                 onBack = { playerExpanded = false },
+                onOpenAlbum = { itemId ->
+                    playerExpanded = false
+                    navController.navigate("podcast/$itemId")
+                },
+                onOpenArtist = { name ->
+                    playerExpanded = false
+                    navController.navigate("artist/${Uri.encode(name)}")
+                },
             )
         }
     }
@@ -234,39 +221,40 @@ private fun MainScaffold(
     controller: MediaController?,
     navController: androidx.navigation.NavHostController,
     playerState: PlayerUiState,
-    onTabScreen: Boolean,
-    currentRoute: String?,
+    selectedTab: String?,
     isOnline: Boolean,
     onExpandPlayer: () -> Unit,
 ) {
+    // Tabs and library sub-pages keep the app chrome; the album detail and
+    // settings/downloads pages go full screen.
+    val showChrome = selectedTab != null
     Scaffold(
         topBar = {
             Column {
-                if (onTabScreen) {
+                if (showChrome) {
                     ShelfieTopBar(
-                        onSearch = { navController.navigate("search") { launchSingleTop = true } },
                         onSettings = { navController.navigate("settings") { launchSingleTop = true } },
                     )
                 }
                 if (!isOnline) {
-                    OfflineBanner(padStatusBar = !onTabScreen)
+                    OfflineBanner(padStatusBar = !showChrome)
                 }
             }
         },
         bottomBar = {
             // The NavigationBar consumes the gesture-nav inset itself; when it's
             // hidden the now-playing bar must avoid the navigation bar on its own.
-            Column(if (onTabScreen) Modifier else Modifier.navigationBarsPadding()) {
+            Column(if (showChrome) Modifier else Modifier.navigationBarsPadding()) {
                 NowPlayingBar(
                     state = playerState,
                     controller = controller,
                     onExpand = onExpandPlayer,
                 )
-                if (onTabScreen) {
+                if (showChrome) {
                     NavigationBar {
                         BOTTOM_TABS.forEach { tab ->
                             NavigationBarItem(
-                                selected = currentRoute == tab.route,
+                                selected = selectedTab == tab.route,
                                 onClick = {
                                     navController.navigate(tab.route) {
                                         popUpTo("home") { saveState = true }
@@ -283,15 +271,15 @@ private fun MainScaffold(
             }
         },
     ) { padding ->
-        // Non-tab screens have no top bar, and a zero-height topBar slot means the
-        // Scaffold applies no status-bar inset — pad explicitly. When offline the
-        // banner occupies the slot (with its own inset), so skip it then.
+        // Full-screen pages have no top bar, and a zero-height topBar slot means
+        // the Scaffold applies no status-bar inset — pad explicitly. When offline
+        // the banner occupies the slot (with its own inset), so skip it then.
         NavHost(
             navController = navController,
             startDestination = "home",
             modifier = Modifier
                 .padding(padding)
-                .then(if (!onTabScreen && isOnline) Modifier.statusBarsPadding() else Modifier),
+                .then(if (!showChrome && isOnline) Modifier.statusBarsPadding() else Modifier),
         ) {
             composable("home") {
                 if (!isOnline) {
@@ -301,30 +289,78 @@ private fun MainScaffold(
                         app = app,
                         controller = controller,
                         onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
-                    )
-                }
-            }
-            composable("latest") {
-                if (!isOnline) {
-                    OfflineTabHint()
-                } else {
-                    LatestScreen(
-                        app = app,
-                        controller = controller,
-                        playerState = playerState,
-                        onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
+                        onOpenMix = { mixId -> navController.navigate("mix/${Uri.encode(mixId)}") },
                     )
                 }
             }
             composable("library") {
+                LibraryScreen(
+                    app = app,
+                    controller = controller,
+                    onOpenAlbum = { itemId -> navController.navigate("podcast/$itemId") },
+                    onOpenAlbums = { navController.navigate("albums") { launchSingleTop = true } },
+                    onOpenArtists = { navController.navigate("artists") { launchSingleTop = true } },
+                    onOpenArtist = { name -> navController.navigate("artist/${Uri.encode(name)}") },
+                    onOpenSongs = { navController.navigate("songs") { launchSingleTop = true } },
+                    onOpenPlaylists = { navController.navigate("playlists") { launchSingleTop = true } },
+                )
+            }
+            composable("search") {
                 if (!isOnline) {
                     OfflineTabHint()
                 } else {
-                    PodcastsScreen(
+                    SearchScreen(
                         app = app,
+                        controller = controller,
                         onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
+                        onBack = {},
+                        showBack = false,
+                        onOpenArtist = { name -> navController.navigate("artist/${Uri.encode(name)}") },
                     )
                 }
+            }
+            composable("albums") {
+                PodcastsScreen(
+                    app = app,
+                    onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
+                    onBack = { navController.popBackStack() },
+                    controller = controller,
+                )
+            }
+            composable("artists") {
+                ArtistsScreen(
+                    app = app,
+                    onBack = { navController.popBackStack() },
+                    onOpenArtist = { name -> navController.navigate("artist/${Uri.encode(name)}") },
+                )
+            }
+            composable("artist/{name}") { entry ->
+                ArtistDetailScreen(
+                    app = app,
+                    artistName = entry.arguments?.getString("name").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                    onOpenAlbum = { itemId -> navController.navigate("podcast/$itemId") },
+                    controller = controller,
+                )
+            }
+            composable("songs") {
+                SongsScreen(
+                    app = app,
+                    controller = controller,
+                    playerState = playerState,
+                    onBack = { navController.popBackStack() },
+                    onOpenAlbum = { itemId -> navController.navigate("podcast/$itemId") },
+                )
+            }
+            composable("mix/{mixId}") { entry ->
+                MixScreen(
+                    app = app,
+                    controller = controller,
+                    playerState = playerState,
+                    mixId = entry.arguments?.getString("mixId").orEmpty(),
+                    onBack = { navController.popBackStack() },
+                    onOpenAlbum = { itemId -> navController.navigate("podcast/$itemId") },
+                )
             }
             composable("podcast/{itemId}") { entry ->
                 val itemId = entry.arguments?.getString("itemId").orEmpty()
@@ -336,19 +372,20 @@ private fun MainScaffold(
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable("playlist") {
+            composable("playlists") {
+                PlaylistsScreen(
+                    app = app,
+                    onBack = { navController.popBackStack() },
+                    onOpenPlaylist = { id -> navController.navigate("playlist/${Uri.encode(id)}") },
+                )
+            }
+            composable("playlist/{playlistId}") { entry ->
                 PlaylistScreen(
                     app = app,
                     controller = controller,
                     playerState = playerState,
                     onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
-                )
-            }
-            composable("search") {
-                SearchScreen(
-                    app = app,
-                    controller = controller,
-                    onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
+                    playlistId = entry.arguments?.getString("playlistId").orEmpty(),
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -370,7 +407,7 @@ private fun MainScaffold(
 }
 
 @Composable
-private fun ShelfieTopBar(onSearch: () -> Unit, onSettings: () -> Unit) {
+private fun ShelfieTopBar(onSettings: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -380,22 +417,19 @@ private fun ShelfieTopBar(onSearch: () -> Unit, onSettings: () -> Unit) {
     ) {
         Image(
             painter = painterResource(R.drawable.ic_launcher_foreground),
-            contentDescription = "Shelfie",
+            contentDescription = "Sonofin",
             modifier = Modifier
                 .size(38.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary),
+                .background(androidx.compose.ui.graphics.Color.White),
         )
         Text(
-            "Shelfie",
+            "Sonofin",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 10.dp),
         )
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = onSearch) {
-            Icon(Icons.Filled.Search, contentDescription = "Search")
-        }
         CastButton(modifier = Modifier.size(44.dp))
         IconButton(onClick = onSettings) {
             Icon(Icons.Filled.Settings, contentDescription = "Settings")

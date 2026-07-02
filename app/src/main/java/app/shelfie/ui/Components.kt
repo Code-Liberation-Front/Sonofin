@@ -18,14 +18,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PlaylistRemove
 import androidx.compose.material.icons.filled.Podcasts
-import androidx.compose.material.icons.filled.RemoveDone
-import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -50,13 +51,17 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.media3.session.MediaController
 import app.shelfie.ShelfieApp
+import app.shelfie.data.LibraryItemSummary
 import app.shelfie.data.PodcastEpisode
 import app.shelfie.download.ActiveDownload
 import app.shelfie.download.DownloadedEpisode
+import app.shelfie.pin.PinnedItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Shared cover + text block for every episode list row (Latest, Playlist,
@@ -173,18 +178,21 @@ fun RowScope.EpisodeRowContent(
     }
 }
 
-/** Options shown in an episode's long-press context menu. */
+/** Options shown in a song's long-press context menu. */
 class EpisodeMenuActions(
-    val isFinished: Boolean,
     val isDownloaded: Boolean,
-    val onResetProgress: () -> Unit,
-    val onToggleFinished: () -> Unit,
     val onAddToPlaylist: () -> Unit,
     /** When null, the "Go to podcast" entry is hidden (e.g. already on it). */
     val onGoToPodcast: (() -> Unit)?,
     val onToggleDownload: () -> Unit,
     /** When non-null, a "Remove from playlist" entry is shown (playlist screen). */
     val onRemoveFromPlaylist: (() -> Unit)? = null,
+    /** Whether the song is pinned to the Library tab. */
+    val isPinned: Boolean = false,
+    /** When non-null, a "Pin/Unpin" entry is shown. */
+    val onTogglePin: (() -> Unit)? = null,
+    /** When non-null, a "Play next" entry is shown. */
+    val onPlayNext: (() -> Unit)? = null,
 )
 
 /**
@@ -219,27 +227,26 @@ fun EpisodeLongPressBox(
             offset = DpOffset(x = 8.dp, y = 0.dp),
             shape = RoundedCornerShape(16.dp),
         ) {
-            DropdownMenuItem(
-                text = { Text("Reset listen time") },
-                leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
-                onClick = {
-                    menuOpen = false
-                    actions.onResetProgress()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(if (actions.isFinished) "Mark as unplayed" else "Mark as finished") },
-                leadingIcon = {
-                    Icon(
-                        if (actions.isFinished) Icons.Filled.RemoveDone else Icons.Filled.DoneAll,
-                        contentDescription = null,
-                    )
-                },
-                onClick = {
-                    menuOpen = false
-                    actions.onToggleFinished()
-                },
-            )
+            actions.onPlayNext?.let { playNext ->
+                DropdownMenuItem(
+                    text = { Text("Play next") },
+                    leadingIcon = { Icon(Icons.Filled.QueueMusic, contentDescription = null) },
+                    onClick = {
+                        menuOpen = false
+                        playNext()
+                    },
+                )
+            }
+            actions.onTogglePin?.let { togglePin ->
+                DropdownMenuItem(
+                    text = { Text(if (actions.isPinned) "Unpin" else "Pin") },
+                    leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                    onClick = {
+                        menuOpen = false
+                        togglePin()
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("Add to playlist") },
                 leadingIcon = { Icon(Icons.Filled.PlaylistAdd, contentDescription = null) },
@@ -250,7 +257,7 @@ fun EpisodeLongPressBox(
             )
             actions.onGoToPodcast?.let { goToPodcast ->
                 DropdownMenuItem(
-                    text = { Text("Go to podcast") },
+                    text = { Text("Go to album") },
                     leadingIcon = { Icon(Icons.Filled.Podcasts, contentDescription = null) },
                     onClick = {
                         menuOpen = false
@@ -282,33 +289,6 @@ fun EpisodeLongPressBox(
                 )
             }
         }
-    }
-}
-
-/** Resets an episode's listening progress back to zero. */
-fun resetEpisodeProgress(
-    app: ShelfieApp,
-    scope: CoroutineScope,
-    itemId: String,
-    episodeId: String,
-    durationSec: Double,
-) {
-    scope.launch(Dispatchers.IO) {
-        runCatching { app.repository.resetProgress(itemId, episodeId, durationSec) }
-    }
-}
-
-/** Marks an episode finished (or back to unplayed). */
-fun setEpisodeFinished(
-    app: ShelfieApp,
-    scope: CoroutineScope,
-    itemId: String,
-    episodeId: String,
-    finished: Boolean,
-    durationSec: Double,
-) {
-    scope.launch(Dispatchers.IO) {
-        runCatching { app.repository.setFinished(itemId, episodeId, finished, durationSec) }
     }
 }
 
@@ -419,6 +399,174 @@ fun bulkDownloadByIds(
         }
     }
 }
+
+/** Options shown in an album card's long-press context menu. */
+class AlbumMenuActions(
+    val isPinned: Boolean,
+    val onPlay: () -> Unit,
+    val onShuffle: () -> Unit,
+    val onTogglePin: () -> Unit,
+    val onDownloadAll: () -> Unit,
+)
+
+/**
+ * Wraps an album card so a tap runs [onClick] and a long-press opens the
+ * album context menu (play, shuffle, pin, download).
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun AlbumLongPressBox(
+    onClick: () -> Unit,
+    actions: AlbumMenuActions,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    Box(modifier) {
+        Box(
+            Modifier.combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    menuOpen = true
+                },
+            ),
+        ) {
+            content()
+        }
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            offset = DpOffset(x = 8.dp, y = 0.dp),
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            DropdownMenuItem(
+                text = { Text("Play") },
+                leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) },
+                onClick = {
+                    menuOpen = false
+                    actions.onPlay()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Shuffle") },
+                leadingIcon = { Icon(Icons.Filled.Shuffle, contentDescription = null) },
+                onClick = {
+                    menuOpen = false
+                    actions.onShuffle()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(if (actions.isPinned) "Unpin" else "Pin") },
+                leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                onClick = {
+                    menuOpen = false
+                    actions.onTogglePin()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Download album") },
+                leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                onClick = {
+                    menuOpen = false
+                    actions.onDownloadAll()
+                },
+            )
+        }
+    }
+}
+
+/** Album order: disc number, then track number, then title. */
+fun List<PodcastEpisode>.sortedByAlbumOrder(): List<PodcastEpisode> = sortedWith(
+    compareBy(
+        { it.season?.toIntOrNull() ?: 0 },
+        { it.episode?.toIntOrNull() ?: Int.MAX_VALUE },
+        { it.title.orEmpty() },
+    ),
+)
+
+/** Fetches an album's songs and plays them (optionally shuffled). */
+fun playAlbum(
+    app: ShelfieApp,
+    scope: CoroutineScope,
+    controller: MediaController?,
+    itemId: String,
+    shuffled: Boolean,
+) {
+    if (controller == null) return
+    scope.launch {
+        val songs = withContext(Dispatchers.IO) {
+            runCatching { app.repository.podcast(itemId).media.episodes }.getOrDefault(emptyList())
+        }.sortedByAlbumOrder()
+        // MediaController must be used from the main thread (this scope).
+        controller.playSongs(if (shuffled) songs.shuffled() else songs)
+    }
+}
+
+/** Downloads every song on an album for offline use. */
+fun downloadAlbum(app: ShelfieApp, scope: CoroutineScope, itemId: String) {
+    scope.launch(Dispatchers.IO) {
+        runCatching {
+            val album = app.repository.podcast(itemId)
+            album.media.episodes.forEach { app.downloads.download(album, it) }
+        }
+    }
+}
+
+/** Builds the standard album context-menu actions for an album card. */
+fun albumMenuActions(
+    app: ShelfieApp,
+    scope: CoroutineScope,
+    controller: MediaController?,
+    pins: List<PinnedItem>,
+    album: LibraryItemSummary,
+): AlbumMenuActions = AlbumMenuActions(
+    isPinned = isAlbumPinned(pins, album.id),
+    onPlay = { playAlbum(app, scope, controller, album.id, shuffled = false) },
+    onShuffle = { playAlbum(app, scope, controller, album.id, shuffled = true) },
+    onTogglePin = {
+        togglePinnedAlbum(
+            app,
+            album.id,
+            title = album.media.metadata.title ?: "Album",
+            subtitle = album.media.metadata.displayAuthor.orEmpty(),
+        )
+    },
+    onDownloadAll = { downloadAlbum(app, scope, album.id) },
+)
+
+/** Pins an album to the Library tab, or unpins it. */
+fun togglePinnedAlbum(app: ShelfieApp, itemId: String, title: String, subtitle: String) {
+    app.pins.toggle(PinnedItem(kind = "album", id = itemId, title = title, subtitle = subtitle))
+}
+
+/** Whether an album is pinned, given the collected pin list. */
+fun isAlbumPinned(pins: List<PinnedItem>, itemId: String): Boolean =
+    pins.any { it.kind == "album" && it.id == itemId }
+
+/** Pins a song to the Library tab, or unpins it if already pinned. */
+fun togglePinnedSong(
+    app: ShelfieApp,
+    itemId: String,
+    episodeId: String,
+    title: String,
+    subtitle: String,
+) {
+    app.pins.toggle(
+        PinnedItem(
+            kind = "song",
+            id = itemId,
+            songId = episodeId,
+            title = title,
+            subtitle = subtitle,
+        ),
+    )
+}
+
+/** Whether a song is pinned, given the collected pin list. */
+fun isSongPinned(pins: List<PinnedItem>, itemId: String, episodeId: String): Boolean =
+    pins.any { it.kind == "song" && it.id == itemId && it.songId == episodeId }
 
 /** Downloads an episode for offline use, or removes the local copy. */
 fun toggleEpisodeDownload(

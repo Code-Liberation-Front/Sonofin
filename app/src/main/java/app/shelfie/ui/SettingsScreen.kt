@@ -48,7 +48,7 @@ import androidx.core.content.ContextCompat
 import app.shelfie.ShelfieApp
 import app.shelfie.data.Library
 import app.shelfie.data.ListeningStats
-import app.shelfie.ui.theme.ShelfieSurfaceHigh
+import app.shelfie.ui.theme.SonofinSurfaceHigh
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -167,7 +167,7 @@ fun SettingsScreen(app: ShelfieApp, onOpenDownloads: () -> Unit, onBack: () -> U
                 Column(Modifier.weight(1f)) {
                     Text("Auto play", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "Continue to the next episode automatically",
+                        "Keep playing random songs when the queue ends",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -366,7 +366,7 @@ fun SettingsScreen(app: ShelfieApp, onOpenDownloads: () -> Unit, onBack: () -> U
                 if (activeDownloads.isNotEmpty()) {
                     append(" • ${activeDownloads.size} in progress")
                 } else if (downloads.isNotEmpty()) {
-                    append(" • ${downloads.size} episodes (${formatBytes(downloads.sumOf { it.sizeBytes })})")
+                    append(" • ${downloads.size} tracks (${formatBytes(downloads.sumOf { it.sizeBytes })})")
                 }
             }
             Text(label)
@@ -386,7 +386,7 @@ fun SettingsScreen(app: ShelfieApp, onOpenDownloads: () -> Unit, onBack: () -> U
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Text("Open Audiobookshelf in browser")
+            Text("Open Jellyfin in browser")
         }
 
         OutlinedButton(
@@ -411,6 +411,7 @@ fun SettingsScreen(app: ShelfieApp, onOpenDownloads: () -> Unit, onBack: () -> U
 }
 
 private fun libraryTypeLabel(mediaType: String): String = when (mediaType) {
+    "music" -> "Music"
     "podcast" -> "Podcasts"
     "book" -> "Audiobooks"
     else -> mediaType.replaceFirstChar { it.uppercase() }
@@ -419,7 +420,7 @@ private fun libraryTypeLabel(mediaType: String): String = when (mediaType) {
 @Composable
 private fun SettingsCard(title: String, content: @Composable () -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = ShelfieSurfaceHigh),
+        colors = CardDefaults.cardColors(containerColor = SonofinSurfaceHigh),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),

@@ -11,11 +11,12 @@ android {
 
     defaultConfig {
         // Must match the package name registered in the Google Play Console.
-        applicationId = "com.shelfie.zbuddy"
+        // Sonofin ships as a brand-new Play listing, so it uses its own id.
+        applicationId = "app.sonofin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "0.9.2"
+        versionCode = 1
+        versionName = "0.1.0"
     }
 
     // Shared, committed keystore so every CI build signs identically and

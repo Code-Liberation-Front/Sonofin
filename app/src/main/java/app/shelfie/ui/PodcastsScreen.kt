@@ -5,6 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,8 +25,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -45,39 +52,59 @@ private sealed interface PodcastsUi {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PodcastsScreen(app: ShelfieApp, onOpenPodcast: (String) -> Unit) {
+fun PodcastsScreen(
+    app: ShelfieApp,
+    onOpenPodcast: (String) -> Unit,
+    onBack: (() -> Unit)? = null,
+    controller: androidx.media3.session.MediaController? = null,
+) {
     var refreshKey by remember { mutableIntStateOf(0) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    val ui by produceState<PodcastsUi>(initialValue = PodcastsUi.Loading, refreshKey) {
-        value = withContext(Dispatchers.IO) {
-            try {
-                if (!app.repository.ensureConfigured()) {
-                    PodcastsUi.Error("Not logged in")
-                } else {
-                    PodcastsUi.Ready(app.repository.podcasts(forceRefresh = refreshKey > 0))
-                }
-            } catch (e: Exception) {
-                PodcastsUi.Error(e.message ?: "Failed to load podcasts")
-            }
-        }
-        isRefreshing = false
+    val albums = rememberServerData(
+        refreshKey = refreshKey,
+        sessionKey = "albums",
+        cached = { app.repository.cachedAlbums().ifEmpty { null } },
+        fetch = {
+            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+            app.repository.podcasts(forceRefresh = true)
+        },
+    )
+    val ui = when {
+        albums.data != null -> PodcastsUi.Ready(albums.data.orEmpty())
+        albums.error != null -> PodcastsUi.Error(albums.error.orEmpty())
+        else -> PodcastsUi.Loading
     }
 
-    PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = {
-            isRefreshing = true
-            refreshKey++
-        },
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        PodcastsContent(app, onOpenPodcast, ui, onRetry = { refreshKey++ })
+    Column(Modifier.fillMaxSize()) {
+        if (onBack != null) {
+            Row(
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            }
+            Text(
+                "Albums",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        RefreshablePage(
+            refreshing = albums.refreshing,
+            onRefresh = { refreshKey++ },
+        ) {
+            PodcastsContent(app, controller, onOpenPodcast, ui, onRetry = { refreshKey++ })
+        }
     }
 }
 
 @Composable
 private fun PodcastsContent(
     app: ShelfieApp,
+    controller: androidx.media3.session.MediaController?,
     onOpenPodcast: (String) -> Unit,
     ui: PodcastsUi,
     onRetry: () -> Unit,
@@ -103,6 +130,8 @@ private fun PodcastsContent(
         }
 
         is PodcastsUi.Ready -> {
+            val scope = rememberCoroutineScope()
+            val pins by app.pins.pins.collectAsState()
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 140.dp),
                 contentPadding = PaddingValues(12.dp),
@@ -115,6 +144,7 @@ private fun PodcastsContent(
                         podcast = podcast,
                         coverUrl = app.repository.coverUrl(podcast.id),
                         onClick = { onOpenPodcast(podcast.id) },
+                        actions = albumMenuActions(app, scope, controller, pins, podcast),
                     )
                 }
             }
@@ -123,8 +153,14 @@ private fun PodcastsContent(
 }
 
 @Composable
-private fun PodcastCard(podcast: LibraryItemSummary, coverUrl: String, onClick: () -> Unit) {
-    Column(modifier = Modifier.clickable(onClick = onClick)) {
+private fun PodcastCard(
+    podcast: LibraryItemSummary,
+    coverUrl: String,
+    onClick: () -> Unit,
+    actions: AlbumMenuActions,
+) {
+    AlbumLongPressBox(onClick = onClick, actions = actions) {
+        Column {
         CoverImage(
             model = coverUrl,
             contentDescription = podcast.media.metadata.title,
@@ -135,7 +171,7 @@ private fun PodcastCard(podcast: LibraryItemSummary, coverUrl: String, onClick: 
                 .clip(RoundedCornerShape(10.dp)),
         )
         Text(
-            text = podcast.media.metadata.title ?: "Podcast",
+            text = podcast.media.metadata.title ?: "Album",
             style = MaterialTheme.typography.titleSmall,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -143,10 +179,11 @@ private fun PodcastCard(podcast: LibraryItemSummary, coverUrl: String, onClick: 
         )
         if (podcast.media.numEpisodes > 0) {
             Text(
-                text = "${podcast.media.numEpisodes} episodes",
+                text = "${podcast.media.numEpisodes} tracks",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
         }
     }
 }

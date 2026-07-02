@@ -1,65 +1,77 @@
 package app.shelfie.data
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
-import retrofit2.http.PATCH
+import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
 
+/**
+ * Retrofit description of the subset of the Jellyfin REST API that Sonofin uses.
+ * Authentication is supplied by an OkHttp interceptor that adds the
+ * `Authorization: MediaBrowser ...` header (see the repository).
+ */
 interface AbsApi {
 
-    @GET("status")
-    suspend fun status(): ServerStatus
+    /** Unauthenticated reachability/handshake check. */
+    @GET("System/Info/Public")
+    suspend fun publicInfo(): JfPublicInfo
 
-    @retrofit2.http.POST("login")
-    suspend fun login(@Body body: LoginRequest): LoginResponse
+    @POST("Users/AuthenticateByName")
+    suspend fun authenticate(@Body body: JfAuthRequest): JfAuthResult
 
-    @GET("auth/openid/callback")
-    suspend fun oidcCallback(
-        @Query("code") code: String,
-        @Query("state") state: String,
-        @Query("code_verifier") codeVerifier: String,
-        @retrofit2.http.Header("Cookie") cookies: String? = null,
-    ): LoginResponse
+    /** The user's library views; music libraries have CollectionType "music". */
+    @GET("Users/{userId}/Views")
+    suspend fun views(@Path("userId") userId: String): JfViewsResponse
 
-    @GET("api/me")
-    suspend fun me(): User
+    @GET("Items")
+    suspend fun items(
+        @Query("UserId") userId: String,
+        @Query("ParentId") parentId: String? = null,
+        @Query("IncludeItemTypes") includeItemTypes: String? = null,
+        @Query("Recursive") recursive: Boolean = true,
+        @Query("SortBy") sortBy: String? = null,
+        @Query("SortOrder") sortOrder: String? = null,
+        @Query("Filters") filters: String? = null,
+        @Query("SearchTerm") searchTerm: String? = null,
+        @Query("StartIndex") startIndex: Int? = null,
+        @Query("Limit") limit: Int? = null,
+        // Only valid ItemFields enum values; AlbumArtist/Artists are returned by default.
+        @Query("Fields") fields: String = "DateCreated,Overview,ChildCount,Genres",
+    ): JfItemsResponse
 
-    @GET("api/libraries")
-    suspend fun libraries(): LibrariesResponse
-
-    @GET("api/libraries/{id}/items")
-    suspend fun libraryItems(
-        @Path("id") libraryId: String,
-        @Query("limit") limit: Int = 500,
-        @Query("sort") sort: String = "media.metadata.title",
-    ): LibraryItemsResponse
-
-    @GET("api/libraries/{id}/recent-episodes")
-    suspend fun recentEpisodes(
-        @Path("id") libraryId: String,
-        @Query("limit") limit: Int = 50,
-    ): RecentEpisodesResponse
-
-    @GET("api/items/{id}")
+    @GET("Users/{userId}/Items/{itemId}")
     suspend fun item(
-        @Path("id") itemId: String,
-        @Query("expanded") expanded: Int = 1,
-    ): LibraryItemExpanded
-
-    @GET("api/me/listening-stats")
-    suspend fun listeningStats(): ListeningStats
-
-    @PATCH("api/me/progress/{itemId}/{episodeId}")
-    suspend fun updateEpisodeProgress(
+        @Path("userId") userId: String,
         @Path("itemId") itemId: String,
-        @Path("episodeId") episodeId: String,
-        @Body body: ProgressUpdate,
+    ): JfItem
+
+    /** Recently added items. Returns a bare JSON array, not a wrapped response. */
+    @GET("Users/{userId}/Items/Latest")
+    suspend fun latest(
+        @Path("userId") userId: String,
+        @Query("IncludeItemTypes") includeItemTypes: String = "Audio",
+        @Query("Limit") limit: Int = 50,
+        @Query("Fields") fields: String = "DateCreated",
+    ): List<JfItem>
+
+    @POST("Users/{userId}/PlayedItems/{itemId}")
+    suspend fun markPlayed(
+        @Path("userId") userId: String,
+        @Path("itemId") itemId: String,
     )
 
-    @PATCH("api/me/progress/{itemId}")
-    suspend fun updateBookProgress(
+    @DELETE("Users/{userId}/PlayedItems/{itemId}")
+    suspend fun markUnplayed(
+        @Path("userId") userId: String,
         @Path("itemId") itemId: String,
-        @Body body: ProgressUpdate,
     )
+
+    @POST("Sessions/Playing/Progress")
+    suspend fun reportProgress(@Body body: JfProgressBody)
+
+    /** Embedded or sidecar lyrics for a song (404 when none exist). */
+    @GET("Audio/{itemId}/Lyrics")
+    suspend fun lyrics(@Path("itemId") itemId: String): JfLyrics
 }

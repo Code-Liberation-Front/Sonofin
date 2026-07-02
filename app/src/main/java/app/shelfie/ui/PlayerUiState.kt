@@ -20,6 +20,7 @@ class PlayerUiState {
     var mediaId by mutableStateOf<String?>(null)
     var title by mutableStateOf("")
     var artist by mutableStateOf("")
+    var albumTitle by mutableStateOf("")
     var artworkUri by mutableStateOf<Uri?>(null)
     var publishDate by mutableStateOf("")
     var isPlaying by mutableStateOf(false)
@@ -44,6 +45,7 @@ fun rememberPlayerUiState(controller: MediaController?): PlayerUiState {
             state.mediaId = controller.currentMediaItem?.mediaId
             state.title = controller.mediaMetadata.title?.toString() ?: ""
             state.artist = controller.mediaMetadata.artist?.toString() ?: ""
+            state.albumTitle = controller.mediaMetadata.albumTitle?.toString() ?: ""
             state.artworkUri = controller.mediaMetadata.artworkUri
             val extras = controller.mediaMetadata.extras
             val publishedAt = extras?.getLong(EXTRA_PUBLISHED_AT, 0L)?.takeIf { it > 0L }

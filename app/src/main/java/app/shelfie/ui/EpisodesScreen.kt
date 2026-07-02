@@ -36,8 +36,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -83,30 +83,29 @@ fun EpisodesScreen(
     playerState: PlayerUiState,
     onBack: () -> Unit,
 ) {
+    var refreshKey by remember { mutableIntStateOf(0) }
     val progressRevision by app.repository.progressRevision.collectAsState()
-    val ui by produceState<EpisodesUi>(initialValue = EpisodesUi.Loading, itemId, progressRevision) {
-        value = withContext(Dispatchers.IO) {
-            try {
-                val podcast = app.repository.podcast(itemId)
-                val rows = podcast.media.episodes
-                    .sortedByDescending { it.publishedAt ?: 0 }
-                    .map { episode ->
-                        val progress = runCatching {
-                            app.repository.progress(itemId, episode.id)
-                        }.getOrNull()
-                        EpisodeRowData(
-                            episode = episode,
-                            progressFraction = (progress?.progress ?: 0.0).toFloat().coerceIn(0f, 1f),
-                            isFinished = progress?.isFinished == true,
-                        )
-                    }
-                EpisodesUi.Ready(podcast, rows)
-            } catch (e: Exception) {
-                EpisodesUi.Error(e.message ?: "Failed to load episodes")
-            }
-        }
-    }
+    val albumState = rememberServerData(
+        key = itemId,
+        refreshKey = refreshKey,
+        refetchKey = progressRevision,
+        cached = {
+            app.repository.cachedAlbum(itemId)?.let { EpisodesUi.Ready(it, buildAlbumRows(app, itemId, it)) }
+        },
+        fetch = {
+            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+            val podcast = app.repository.podcast(itemId, forceRefresh = true)
+            EpisodesUi.Ready(podcast, buildAlbumRows(app, itemId, podcast))
+        },
+    )
+    val ui: EpisodesUi = albumState.data
+        ?: albumState.error?.let { EpisodesUi.Error(it) }
+        ?: EpisodesUi.Loading
 
+    RefreshablePage(
+        refreshing = albumState.refreshing,
+        onRefresh = { refreshKey++ },
+    ) {
     when (val state = ui) {
         is EpisodesUi.Loading -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -124,6 +123,7 @@ fun EpisodesScreen(
             val scope = rememberCoroutineScope()
             val completedDownloads by app.downloads.completed.collectAsState()
             val activeDownloads by app.downloads.active.collectAsState()
+            val pins by app.pins.pins.collectAsState()
             var pickerEntry by remember { mutableStateOf<PlaylistEntry?>(null) }
             var selectMode by remember { mutableStateOf(false) }
             var selectedIds by remember { mutableStateOf(emptySet<String>()) }
@@ -146,7 +146,7 @@ fun EpisodesScreen(
                         PlaylistEntry(
                             itemId = itemId,
                             episodeId = ep.id,
-                            title = ep.title ?: "Episode",
+                            title = ep.title ?: "Song",
                             podcastTitle = state.podcast.media.metadata.title ?: "",
                         )
                     },
@@ -164,6 +164,19 @@ fun EpisodesScreen(
                         coverUrl = app.repository.coverUrl(itemId),
                         onBack = onBack,
                     )
+                }
+                if (episodeRows.isNotEmpty()) {
+                    item {
+                        Box(Modifier.padding(horizontal = 16.dp)) {
+                            PlayShuffleButtons(
+                                enabled = true,
+                                onPlay = { controller?.playSongs(episodeRows.map { it.episode }) },
+                                onShuffle = {
+                                    controller?.playSongs(episodeRows.map { it.episode }.shuffled())
+                                },
+                            )
+                        }
+                    }
                 }
                 if (episodeRows.isNotEmpty()) {
                     item {
@@ -228,19 +241,21 @@ fun EpisodesScreen(
                             }
                         },
                         actions = EpisodeMenuActions(
-                            isFinished = row.isFinished,
                             isDownloaded = isDownloaded,
-                            onResetProgress = {
-                                resetEpisodeProgress(app, scope, itemId, row.episode.id, durationSec)
-                            },
-                            onToggleFinished = {
-                                setEpisodeFinished(app, scope, itemId, row.episode.id, finished = !row.isFinished, durationSec = durationSec)
+                            isPinned = isSongPinned(pins, itemId, row.episode.id),
+                            onPlayNext = { controller?.playNext(itemId, row.episode.id) },
+                            onTogglePin = {
+                                togglePinnedSong(
+                                    app, itemId, row.episode.id,
+                                    title = row.episode.title ?: "Song",
+                                    subtitle = state.podcast.media.metadata.title.orEmpty(),
+                                )
                             },
                             onAddToPlaylist = {
                                 pickerEntry = PlaylistEntry(
                                     itemId = itemId,
                                     episodeId = row.episode.id,
-                                    title = row.episode.title ?: "Episode",
+                                    title = row.episode.title ?: "Song",
                                     podcastTitle = state.podcast.media.metadata.title ?: "",
                                 )
                             },
@@ -269,7 +284,24 @@ fun EpisodesScreen(
             }
         }
     }
+    }
 }
+
+/** Track rows with per-song progress, in album order. */
+private suspend fun buildAlbumRows(
+    app: ShelfieApp,
+    itemId: String,
+    podcast: LibraryItemExpanded,
+): List<EpisodeRowData> = podcast.media.episodes
+    .sortedByAlbumOrder()
+    .map { episode ->
+        val progress = runCatching { app.repository.progress(itemId, episode.id) }.getOrNull()
+        EpisodeRowData(
+            episode = episode,
+            progressFraction = (progress?.progress ?: 0.0).toFloat().coerceIn(0f, 1f),
+            isFinished = progress?.isFinished == true,
+        )
+    }
 
 @Composable
 private fun PodcastHeader(podcast: LibraryItemExpanded, coverUrl: String, onBack: () -> Unit) {
@@ -290,7 +322,7 @@ private fun PodcastHeader(podcast: LibraryItemExpanded, coverUrl: String, onBack
             )
             Column(Modifier.padding(start = 16.dp)) {
                 Text(
-                    podcast.media.metadata.title ?: "Podcast",
+                    podcast.media.metadata.title ?: "Album",
                     style = MaterialTheme.typography.titleLarge,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
@@ -303,7 +335,7 @@ private fun PodcastHeader(podcast: LibraryItemExpanded, coverUrl: String, onBack
                     )
                 }
                 val countText = when {
-                    podcast.media.episodes.isNotEmpty() -> "${podcast.media.episodes.size} episodes"
+                    podcast.media.episodes.isNotEmpty() -> "${podcast.media.episodes.size} songs"
                     podcast.media.tracks.isNotEmpty() -> "${podcast.media.tracks.size} parts"
                     else -> ""
                 }
@@ -378,12 +410,10 @@ private fun EpisodeRow(
     val episode = row.episode
     val completed = isNearlyComplete(row.progressFraction, row.isFinished)
     val durationSec = (episode.audioTrack?.duration ?: episode.audioFile?.duration ?: 0.0).toLong()
-    val dateLine = listOf(
-        formatEpisodeDate(episode.publishedAt, episode.pubDate),
-        formatDuration(durationSec),
-    )
-        .filter { it.isNotBlank() }
-        .joinToString(" • ")
+    val dateLine = listOfNotNull(
+        episode.episode?.let { "Track $it" },
+        formatDuration(durationSec).takeIf { it.isNotBlank() },
+    ).joinToString(" • ")
 
     val rowContent: @Composable () -> Unit = {
         Row(
@@ -398,8 +428,8 @@ private fun EpisodeRow(
             }
             EpisodeRowContent(
                 coverUrl = coverUrl,
-                title = episode.title ?: "Episode",
-                subtitle = null,
+                title = episode.title ?: "Song",
+                subtitle = episode.subtitle,
                 dateLine = dateLine,
                 progressFraction = row.progressFraction,
                 completed = completed,
@@ -408,22 +438,15 @@ private fun EpisodeRow(
             )
             if (!selectMode) {
                 Spacer(Modifier.width(4.dp))
-                when {
-                    row.isFinished && !isCurrent -> Icon(
-                        Icons.Filled.CheckCircle,
-                        contentDescription = "Finished",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(36.dp),
-                    )
-
-                    isCurrent && isPlaying -> Icon(
+                if (isCurrent && isPlaying) {
+                    Icon(
                         Icons.Filled.PauseCircle,
                         contentDescription = "Pause",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(36.dp),
                     )
-
-                    else -> Icon(
+                } else {
+                    Icon(
                         Icons.Filled.PlayCircle,
                         contentDescription = "Play",
                         tint = MaterialTheme.colorScheme.primary,
