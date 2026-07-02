@@ -17,12 +17,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -33,15 +38,18 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +70,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.media3.session.MediaController
+import app.shelfie.ShelfieApp
+import app.shelfie.playlist.PlaylistEntry
+import app.shelfie.playlist.PlaylistStore
 import app.shelfie.ui.theme.SonofinSurface
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -70,6 +81,7 @@ private val SPEED_OPTIONS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f)
 
 @Composable
 fun PlayerScreen(
+    app: ShelfieApp,
     state: PlayerUiState,
     controller: MediaController?,
     onBack: () -> Unit,
@@ -154,70 +166,93 @@ fun PlayerScreen(
         )
         Spacer(Modifier.height(24.dp))
 
-        Text(
-            state.title,
-            style = MaterialTheme.typography.titleLarge,
-            textAlign = TextAlign.Center,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
+        // Apple Music-style header: title/artist on the left, favorite heart right.
+        val songIds = state.mediaId
+            ?.takeIf { it.startsWith("episode:") }
+            ?.split(":", limit = 3)
+            ?.takeIf { it.size == 3 }
+        val albumId = songIds?.getOrNull(1)
+        val episodeId = songIds?.getOrNull(2)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth(),
-        )
-        if (state.artist.isNotBlank()) {
-            var artistMenuOpen by remember { mutableStateOf(false) }
-            Box {
+        ) {
+            Column(Modifier.weight(1f)) {
                 Text(
-                    state.artist,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
+                    state.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.clickable { artistMenuOpen = true },
                 )
-                DropdownMenu(
-                    expanded = artistMenuOpen,
-                    onDismissRequest = { artistMenuOpen = false },
-                    shape = RoundedCornerShape(16.dp),
-                ) {
-                    val albumId = state.mediaId
-                        ?.takeIf { it.startsWith("episode:") }
-                        ?.split(":", limit = 3)
-                        ?.getOrNull(1)
-                    if (albumId != null) {
-                        DropdownMenuItem(
-                            text = { Text("Go to album") },
-                            leadingIcon = { Icon(Icons.Filled.Album, contentDescription = null) },
-                            onClick = {
-                                artistMenuOpen = false
-                                onOpenAlbum(albumId)
-                            },
+                if (state.artist.isNotBlank()) {
+                    var artistMenuOpen by remember { mutableStateOf(false) }
+                    Box {
+                        Text(
+                            state.artist,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable { artistMenuOpen = true },
                         )
+                        DropdownMenu(
+                            expanded = artistMenuOpen,
+                            onDismissRequest = { artistMenuOpen = false },
+                            shape = RoundedCornerShape(16.dp),
+                        ) {
+                            if (albumId != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Go to album") },
+                                    leadingIcon = { Icon(Icons.Filled.Album, contentDescription = null) },
+                                    onClick = {
+                                        artistMenuOpen = false
+                                        onOpenAlbum(albumId)
+                                    },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Go to artist") },
+                                leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
+                                onClick = {
+                                    artistMenuOpen = false
+                                    onOpenArtist(state.artist)
+                                },
+                            )
+                        }
                     }
-                    DropdownMenuItem(
-                        text = { Text("Go to artist") },
-                        leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
-                        onClick = {
-                            artistMenuOpen = false
-                            onOpenArtist(state.artist)
-                        },
+                }
+                if (state.albumTitle.isNotBlank() && state.albumTitle != state.artist) {
+                    Text(
+                        state.albumTitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
-        }
-        if (state.albumTitle.isNotBlank() && state.albumTitle != state.artist) {
-            Text(
-                state.albumTitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (state.publishDate.isNotBlank()) {
-            Text(
-                state.publishDate,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (albumId != null && episodeId != null) {
+                val playlists by app.playlist.playlists.collectAsState()
+                val isFavorite = PlaylistStore.isFavorite(playlists, albumId, episodeId)
+                IconButton(
+                    onClick = {
+                        app.playlist.toggleFavorite(
+                            PlaylistEntry(
+                                itemId = albumId,
+                                episodeId = episodeId,
+                                title = state.title,
+                                podcastTitle = state.albumTitle.ifBlank { state.artist },
+                            ),
+                        )
+                    },
+                ) {
+                    Icon(
+                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        contentDescription = if (isFavorite) "Remove from Favorites" else "Add to Favorites",
+                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(24.dp))
 
@@ -251,7 +286,157 @@ fun PlayerScreen(
         }
         Spacer(Modifier.height(24.dp))
 
-            SpeedSelector(state = state, controller = controller)
+            // Bottom row, Apple Music-style: speed, cast, and the queue/history
+            // button in the bottom-right corner.
+            var queueOpen by remember { mutableStateOf(false) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                SpeedSelector(state = state, controller = controller)
+                CastButton(modifier = Modifier.size(44.dp))
+                IconButton(onClick = { queueOpen = true }) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.QueueMusic,
+                        contentDescription = "History and queue",
+                    )
+                }
+            }
+            if (queueOpen) {
+                QueueSheet(
+                    state = state,
+                    controller = controller,
+                    onDismiss = { queueOpen = false },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The Apple Music-style queue sheet: songs already played in this queue
+ * (History, most recent first), then what's playing next. Tapping any row
+ * jumps playback to that song.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QueueSheet(
+    state: PlayerUiState,
+    controller: MediaController?,
+    onDismiss: () -> Unit,
+) {
+    // Snapshot the queue each time the current song changes while open.
+    val entries = remember(state.mediaId) {
+        controller?.let { c ->
+            (0 until c.mediaItemCount).map { index ->
+                val metadata = c.getMediaItemAt(index).mediaMetadata
+                QueueRow(
+                    index = index,
+                    title = metadata.title?.toString() ?: "Song",
+                    artist = metadata.artist?.toString() ?: "",
+                    artworkUri = metadata.artworkUri,
+                    isCurrent = index == c.currentMediaItemIndex,
+                )
+            }
+        } ?: emptyList()
+    }
+    val currentIndex = entries.indexOfFirst { it.isCurrent }
+    val history = if (currentIndex > 0) entries.take(currentIndex).reversed() else emptyList()
+    val upNext = if (currentIndex >= 0) entries.drop(currentIndex + 1) else emptyList()
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        LazyColumn(Modifier.fillMaxWidth()) {
+            if (history.isNotEmpty()) {
+                item { QueueSectionTitle("History") }
+                items(history, key = { "h:${it.index}" }) { row ->
+                    QueueRowItem(row, controller, onDismiss)
+                }
+            }
+            if (upNext.isNotEmpty()) {
+                item { QueueSectionTitle("Playing Next") }
+                items(upNext, key = { "n:${it.index}" }) { row ->
+                    QueueRowItem(row, controller, onDismiss)
+                }
+            }
+            if (history.isEmpty() && upNext.isEmpty()) {
+                item {
+                    Text(
+                        "Nothing else in this queue yet.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+private data class QueueRow(
+    val index: Int,
+    val title: String,
+    val artist: String,
+    val artworkUri: android.net.Uri?,
+    val isCurrent: Boolean,
+)
+
+@Composable
+private fun QueueSectionTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+    )
+}
+
+@Composable
+private fun QueueRowItem(
+    row: QueueRow,
+    controller: MediaController?,
+    onDismiss: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                controller?.seekTo(row.index, 0L)
+                controller?.play()
+                onDismiss()
+            }
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+    ) {
+        CoverImage(
+            model = row.artworkUri,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(6.dp)),
+        )
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(start = 12.dp),
+        ) {
+            Text(
+                row.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (row.artist.isNotBlank()) {
+                Text(
+                    row.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

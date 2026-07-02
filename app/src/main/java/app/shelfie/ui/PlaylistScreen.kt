@@ -317,7 +317,6 @@ fun PlaylistScreen(
                         meta = meta,
                         downloadUi = downloadUiFor(app, activeDownloads, downloaded, entry.itemId, entry.episodeId),
                         actions = EpisodeMenuActions(
-                            isFinished = meta?.isFinished == true,
                             isDownloaded = isDownloaded,
                             isPinned = isSongPinned(pins, entry.itemId, entry.episodeId),
                             onPlayNext = { controller?.playNext(entry.itemId, entry.episodeId) },
@@ -326,16 +325,6 @@ fun PlaylistScreen(
                                     app, entry.itemId, entry.episodeId,
                                     title = entry.title,
                                     subtitle = entry.podcastTitle,
-                                )
-                            },
-                            onResetProgress = {
-                                resetEpisodeProgress(app, scope, entry.itemId, entry.episodeId, meta?.durationSec ?: 0.0)
-                            },
-                            onToggleFinished = {
-                                setEpisodeFinished(
-                                    app, scope, entry.itemId, entry.episodeId,
-                                    finished = meta?.isFinished != true,
-                                    durationSec = meta?.durationSec ?: 0.0,
                                 )
                             },
                             onAddToPlaylist = { pickerEntry = entry },

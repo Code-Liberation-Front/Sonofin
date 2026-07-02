@@ -241,7 +241,6 @@ fun EpisodesScreen(
                             }
                         },
                         actions = EpisodeMenuActions(
-                            isFinished = row.isFinished,
                             isDownloaded = isDownloaded,
                             isPinned = isSongPinned(pins, itemId, row.episode.id),
                             onPlayNext = { controller?.playNext(itemId, row.episode.id) },
@@ -251,12 +250,6 @@ fun EpisodesScreen(
                                     title = row.episode.title ?: "Song",
                                     subtitle = state.podcast.media.metadata.title.orEmpty(),
                                 )
-                            },
-                            onResetProgress = {
-                                resetEpisodeProgress(app, scope, itemId, row.episode.id, durationSec)
-                            },
-                            onToggleFinished = {
-                                setEpisodeFinished(app, scope, itemId, row.episode.id, finished = !row.isFinished, durationSec = durationSec)
                             },
                             onAddToPlaylist = {
                                 pickerEntry = PlaylistEntry(
@@ -445,22 +438,15 @@ private fun EpisodeRow(
             )
             if (!selectMode) {
                 Spacer(Modifier.width(4.dp))
-                when {
-                    row.isFinished && !isCurrent -> Icon(
-                        Icons.Filled.CheckCircle,
-                        contentDescription = "Finished",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(36.dp),
-                    )
-
-                    isCurrent && isPlaying -> Icon(
+                if (isCurrent && isPlaying) {
+                    Icon(
                         Icons.Filled.PauseCircle,
                         contentDescription = "Pause",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(36.dp),
                     )
-
-                    else -> Icon(
+                } else {
+                    Icon(
                         Icons.Filled.PlayCircle,
                         contentDescription = "Play",
                         tint = MaterialTheme.colorScheme.primary,

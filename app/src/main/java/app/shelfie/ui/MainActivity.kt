@@ -198,6 +198,7 @@ fun MainNavigation(app: ShelfieApp, controller: MediaController?) {
             exit = slideOutVertically(animationSpec = tween(300), targetOffsetY = { it }),
         ) {
             PlayerScreen(
+                app = app,
                 state = playerState,
                 controller = controller,
                 onBack = { playerExpanded = false },

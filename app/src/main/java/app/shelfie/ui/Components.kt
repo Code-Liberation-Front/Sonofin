@@ -18,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.PlayArrow
@@ -27,8 +26,6 @@ import androidx.compose.material.icons.filled.PlaylistRemove
 import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.QueueMusic
-import androidx.compose.material.icons.filled.RemoveDone
-import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -183,10 +180,7 @@ fun RowScope.EpisodeRowContent(
 
 /** Options shown in a song's long-press context menu. */
 class EpisodeMenuActions(
-    val isFinished: Boolean,
     val isDownloaded: Boolean,
-    val onResetProgress: () -> Unit,
-    val onToggleFinished: () -> Unit,
     val onAddToPlaylist: () -> Unit,
     /** When null, the "Go to podcast" entry is hidden (e.g. already on it). */
     val onGoToPodcast: (() -> Unit)?,
@@ -254,27 +248,6 @@ fun EpisodeLongPressBox(
                 )
             }
             DropdownMenuItem(
-                text = { Text("Reset listen time") },
-                leadingIcon = { Icon(Icons.Filled.RestartAlt, contentDescription = null) },
-                onClick = {
-                    menuOpen = false
-                    actions.onResetProgress()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(if (actions.isFinished) "Mark as unplayed" else "Mark as finished") },
-                leadingIcon = {
-                    Icon(
-                        if (actions.isFinished) Icons.Filled.RemoveDone else Icons.Filled.DoneAll,
-                        contentDescription = null,
-                    )
-                },
-                onClick = {
-                    menuOpen = false
-                    actions.onToggleFinished()
-                },
-            )
-            DropdownMenuItem(
                 text = { Text("Add to playlist") },
                 leadingIcon = { Icon(Icons.Filled.PlaylistAdd, contentDescription = null) },
                 onClick = {
@@ -316,33 +289,6 @@ fun EpisodeLongPressBox(
                 )
             }
         }
-    }
-}
-
-/** Resets an episode's listening progress back to zero. */
-fun resetEpisodeProgress(
-    app: ShelfieApp,
-    scope: CoroutineScope,
-    itemId: String,
-    episodeId: String,
-    durationSec: Double,
-) {
-    scope.launch(Dispatchers.IO) {
-        runCatching { app.repository.resetProgress(itemId, episodeId, durationSec) }
-    }
-}
-
-/** Marks an episode finished (or back to unplayed). */
-fun setEpisodeFinished(
-    app: ShelfieApp,
-    scope: CoroutineScope,
-    itemId: String,
-    episodeId: String,
-    finished: Boolean,
-    durationSec: Double,
-) {
-    scope.launch(Dispatchers.IO) {
-        runCatching { app.repository.setFinished(itemId, episodeId, finished, durationSec) }
     }
 }
 

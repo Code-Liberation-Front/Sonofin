@@ -192,7 +192,6 @@ fun SearchScreen(
                                 coverUrl = app.repository.coverUrl(itemId),
                                 downloadUi = downloadUiFor(app, activeDownloads, completedDownloads, itemId, episode.id),
                                 actions = EpisodeMenuActions(
-                                    isFinished = false,
                                     isDownloaded = isDownloaded,
                                     isPinned = isSongPinned(pins, itemId, episode.id),
                                     onPlayNext = { controller?.playNext(itemId, episode.id) },
@@ -202,12 +201,6 @@ fun SearchScreen(
                                             title = episode.title ?: "Song",
                                             subtitle = podcast.media.metadata.title.orEmpty(),
                                         )
-                                    },
-                                    onResetProgress = {
-                                        resetEpisodeProgress(app, scope, itemId, episode.id, durationSec)
-                                    },
-                                    onToggleFinished = {
-                                        setEpisodeFinished(app, scope, itemId, episode.id, finished = true, durationSec = durationSec)
                                     },
                                     onAddToPlaylist = {
                                         pickerEntry = PlaylistEntry(

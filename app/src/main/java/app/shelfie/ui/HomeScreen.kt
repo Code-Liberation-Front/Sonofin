@@ -181,8 +181,6 @@ private fun HomeContent(
                             items(state.inProgress, key = { it.episode.id }) { entry ->
                                 val itemId = entry.podcast.id
                                 val episodeId = entry.episode.id
-                                val durationSec = (entry.episode.audioTrack?.duration
-                                    ?: entry.episode.audioFile?.duration ?: 0.0)
                                 val isDownloaded = completedDownloads.any {
                                     it.itemId == itemId && it.episodeId == episodeId
                                 }
@@ -190,7 +188,6 @@ private fun HomeContent(
                                     entry = entry,
                                     coverUrl = app.repository.coverUrl(itemId),
                                     actions = EpisodeMenuActions(
-                                        isFinished = false,
                                         isDownloaded = isDownloaded,
                                         isPinned = isSongPinned(pins, itemId, episodeId),
                                         onPlayNext = { controller?.playNext(itemId, episodeId) },
@@ -200,12 +197,6 @@ private fun HomeContent(
                                                 title = entry.episode.title ?: "Song",
                                                 subtitle = entry.podcast.media.metadata.title.orEmpty(),
                                             )
-                                        },
-                                        onResetProgress = {
-                                            resetEpisodeProgress(app, scope, itemId, episodeId, durationSec)
-                                        },
-                                        onToggleFinished = {
-                                            setEpisodeFinished(app, scope, itemId, episodeId, finished = true, durationSec = durationSec)
                                         },
                                         onAddToPlaylist = {
                                             pickerEntry = PlaylistEntry(

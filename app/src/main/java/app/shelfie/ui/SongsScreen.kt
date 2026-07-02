@@ -308,7 +308,6 @@ private fun SongListView(
                     }
                 },
                 actions = EpisodeMenuActions(
-                    isFinished = false,
                     isDownloaded = isDownloaded,
                     isPinned = isSongPinned(pins, itemId, song.id),
                     onPlayNext = { controller?.playNext(itemId, song.id) },
@@ -318,12 +317,6 @@ private fun SongListView(
                             title = song.title ?: "Song",
                             subtitle = song.subtitle.orEmpty(),
                         )
-                    },
-                    onResetProgress = {
-                        resetEpisodeProgress(app, scope, itemId, song.id, durationSec)
-                    },
-                    onToggleFinished = {
-                        setEpisodeFinished(app, scope, itemId, song.id, finished = true, durationSec = durationSec)
                     },
                     onAddToPlaylist = {
                         pickerEntry = PlaylistEntry(
