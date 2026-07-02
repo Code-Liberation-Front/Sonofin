@@ -221,6 +221,18 @@ data class JfUserData(
 )
 
 @Serializable
+data class JfLyrics(
+    @SerialName("Lyrics") val lyrics: List<JfLyricLine> = emptyList(),
+)
+
+@Serializable
+data class JfLyricLine(
+    @SerialName("Text") val text: String? = null,
+    /** Position in ticks (100ns); null for unsynced lyrics. */
+    @SerialName("Start") val start: Long? = null,
+)
+
+@Serializable
 data class JfProgressBody(
     @SerialName("ItemId") val itemId: String,
     @SerialName("PositionTicks") val positionTicks: Long,

@@ -16,14 +16,10 @@ import androidx.media3.cast.SessionAvailabilityListener
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
-import androidx.media3.session.SessionCommand
-import androidx.media3.session.SessionResult
-import app.shelfie.R
 import app.shelfie.ShelfieApp
 import app.shelfie.data.BookTrack
 import app.shelfie.data.LibraryItemExpanded
@@ -88,10 +84,6 @@ private const val STATUS_NOT_PLAYED = 0
 private const val STATUS_PARTIALLY_PLAYED = 1
 private const val STATUS_FULLY_PLAYED = 2
 
-// Custom session commands so Android Auto shows the app's skip buttons.
-private const val COMMAND_SKIP_BACK = "app.shelfie.SKIP_BACK_10"
-private const val COMMAND_SKIP_FORWARD = "app.shelfie.SKIP_FORWARD_30"
-
 @UnstableApi
 class PlaybackService : MediaLibraryService() {
 
@@ -112,7 +104,10 @@ class PlaybackService : MediaLibraryService() {
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
+                    // MUSIC content ducks the volume during notifications and
+                    // other transient focus losses instead of pausing (speech
+                    // content pauses, a leftover from the podcast era).
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build(),
                 /* handleAudioFocus= */ true,
             )
@@ -128,30 +123,24 @@ class PlaybackService : MediaLibraryService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val skipBackButton = CommandButton.Builder()
-            .setDisplayName("Back 10 seconds")
-            .setIconResId(R.drawable.ic_skip_back_10)
-            .setSessionCommand(SessionCommand(COMMAND_SKIP_BACK, Bundle.EMPTY))
-            .build()
-        val skipForwardButton = CommandButton.Builder()
-            .setDisplayName("Forward 30 seconds")
-            .setIconResId(R.drawable.ic_skip_forward_30)
-            .setSessionCommand(SessionCommand(COMMAND_SKIP_FORWARD, Bundle.EMPTY))
-            .build()
+        // No custom layout: the notification and Auto show the default
+        // previous / play-pause / next transport controls.
         mediaSession = MediaLibrarySession.Builder(this, player, LibraryCallback())
             .setSessionActivity(sessionActivity)
-            .setCustomLayout(listOf(skipBackButton, skipForwardButton))
             .build()
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (!isPlaying) {
+                if (isPlaying) {
+                    recordHistory()
+                } else {
                     serviceScope.launch { pushProgress() }
                 }
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 maybeExtendQueue()
+                if (player.isPlaying) recordHistory()
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -261,6 +250,21 @@ class PlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
+    /** Adds the playing song to the persistent all-time history. */
+    private fun recordHistory() {
+        val item = activePlayer?.currentMediaItem ?: return
+        val mediaId = item.mediaId
+        if (!mediaId.startsWith(EPISODE_PREFIX)) return
+        val parts = mediaId.split(":", limit = 3)
+        if (parts.size != 3) return
+        app.history.record(
+            itemId = parts[1],
+            songId = parts[2],
+            title = item.mediaMetadata.title?.toString() ?: "Song",
+            artist = item.mediaMetadata.artist?.toString() ?: "",
+        )
+    }
+
     // region autoplay continuation
 
     private var extendingQueue = false
@@ -368,41 +372,6 @@ class PlaybackService : MediaLibraryService() {
     // region browse tree / search / item resolution
 
     private inner class LibraryCallback : MediaLibrarySession.Callback {
-
-        override fun onConnect(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-        ): MediaSession.ConnectionResult {
-            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
-                .buildUpon()
-                .add(SessionCommand(COMMAND_SKIP_BACK, Bundle.EMPTY))
-                .add(SessionCommand(COMMAND_SKIP_FORWARD, Bundle.EMPTY))
-                .build()
-            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailableSessionCommands(sessionCommands)
-                .build()
-        }
-
-        override fun onCustomCommand(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-            customCommand: SessionCommand,
-            args: Bundle,
-        ): ListenableFuture<SessionResult> {
-            return when (customCommand.customAction) {
-                COMMAND_SKIP_BACK -> {
-                    activePlayer?.seekBack()
-                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-                }
-
-                COMMAND_SKIP_FORWARD -> {
-                    activePlayer?.seekForward()
-                    Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
-                }
-
-                else -> Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
-            }
-        }
 
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,

@@ -17,24 +17,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Forward30
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Replay10
-import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -44,14 +47,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -71,13 +75,15 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.media3.session.MediaController
 import app.shelfie.ShelfieApp
+import app.shelfie.data.AbsRepository
+import app.shelfie.history.PlayedSong
 import app.shelfie.playlist.PlaylistEntry
 import app.shelfie.playlist.PlaylistStore
 import app.shelfie.ui.theme.SonofinSurface
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
-
-private val SPEED_OPTIONS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f)
 
 @Composable
 fun PlayerScreen(
@@ -263,8 +269,8 @@ fun PlayerScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            IconButton(onClick = { controller?.seekBack() }, modifier = Modifier.size(64.dp)) {
-                Icon(Icons.Filled.Replay10, contentDescription = "Back 10 seconds", modifier = Modifier.size(40.dp))
+            IconButton(onClick = { controller?.seekToPrevious() }, modifier = Modifier.size(64.dp)) {
+                Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", modifier = Modifier.size(44.dp))
             }
             FilledIconButton(
                 onClick = { controller?.let { if (it.isPlaying) it.pause() else it.play() } },
@@ -280,21 +286,24 @@ fun PlayerScreen(
                     )
                 }
             }
-            IconButton(onClick = { controller?.seekForward() }, modifier = Modifier.size(64.dp)) {
-                Icon(Icons.Filled.Forward30, contentDescription = "Forward 30 seconds", modifier = Modifier.size(40.dp))
+            IconButton(onClick = { controller?.seekToNext() }, modifier = Modifier.size(64.dp)) {
+                Icon(Icons.Filled.SkipNext, contentDescription = "Next", modifier = Modifier.size(44.dp))
             }
         }
         Spacer(Modifier.height(24.dp))
 
-            // Bottom row, Apple Music-style: speed, cast, and the queue/history
+            // Bottom row, Apple Music-style: lyrics, cast, and the queue/history
             // button in the bottom-right corner.
+            var lyricsOpen by remember { mutableStateOf(false) }
             var queueOpen by remember { mutableStateOf(false) }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                SpeedSelector(state = state, controller = controller)
+                IconButton(onClick = { lyricsOpen = true }) {
+                    Icon(Icons.Filled.Lyrics, contentDescription = "Lyrics")
+                }
                 CastButton(modifier = Modifier.size(44.dp))
                 IconButton(onClick = { queueOpen = true }) {
                     Icon(
@@ -303,8 +312,18 @@ fun PlayerScreen(
                     )
                 }
             }
+            if (lyricsOpen) {
+                LyricsSheet(
+                    app = app,
+                    state = state,
+                    controller = controller,
+                    songId = episodeId,
+                    onDismiss = { lyricsOpen = false },
+                )
+            }
             if (queueOpen) {
                 QueueSheet(
+                    app = app,
                     state = state,
                     controller = controller,
                     onDismiss = { queueOpen = false },
@@ -315,13 +334,104 @@ fun PlayerScreen(
 }
 
 /**
- * The Apple Music-style queue sheet: songs already played in this queue
- * (History, most recent first), then what's playing next. Tapping any row
- * jumps playback to that song.
+ * Scrolling lyrics from Jellyfin. Synced lyrics highlight the current line
+ * and auto-scroll with playback; unsynced lyrics are a plain scrollable list.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LyricsSheet(
+    app: ShelfieApp,
+    state: PlayerUiState,
+    controller: MediaController?,
+    songId: String?,
+    onDismiss: () -> Unit,
+) {
+    val lines by produceState<List<AbsRepository.LyricLine>?>(initialValue = null, songId) {
+        value = withContext(Dispatchers.IO) {
+            if (songId.isNullOrBlank()) emptyList() else app.repository.lyrics(songId)
+        }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        val loaded = lines
+        when {
+            loaded == null -> {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+
+            loaded.isEmpty() -> {
+                Text(
+                    "No lyrics found for this song.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 48.dp),
+                )
+            }
+
+            else -> {
+                val synced = loaded.any { it.startMs != null }
+                // The last line whose timestamp has passed is the current one.
+                val currentLine = if (synced) {
+                    loaded.indexOfLast { (it.startMs ?: Long.MAX_VALUE) <= state.positionMs }
+                } else {
+                    -1
+                }
+                val listState = rememberLazyListState()
+                if (synced) {
+                    LaunchedEffect(currentLine) {
+                        if (currentLine >= 0) {
+                            listState.animateScrollToItem(index = currentLine, scrollOffset = -300)
+                        }
+                    }
+                }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.7f),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                ) {
+                    itemsIndexed(loaded) { index, line ->
+                        val isCurrent = index == currentLine
+                        Text(
+                            line.text.ifBlank { "…" },
+                            style = MaterialTheme.typography.titleMedium,
+                            color = when {
+                                isCurrent -> MaterialTheme.colorScheme.primary
+                                synced && index < currentLine -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.onSurface
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = synced && line.startMs != null) {
+                                    // Tap a line to seek there, Apple Music-style.
+                                    line.startMs?.let { controller?.seekTo(it) }
+                                }
+                                .padding(vertical = 6.dp),
+                        )
+                    }
+                    item { Spacer(Modifier.height(48.dp)) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The Apple Music-style queue sheet: Playing Next from the live queue, then
+ * the persistent all-time History (last 50 songs played, most recent first).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QueueSheet(
+    app: ShelfieApp,
     state: PlayerUiState,
     controller: MediaController?,
     onDismiss: () -> Unit,
@@ -342,27 +452,35 @@ private fun QueueSheet(
         } ?: emptyList()
     }
     val currentIndex = entries.indexOfFirst { it.isCurrent }
-    val history = if (currentIndex > 0) entries.take(currentIndex).reversed() else emptyList()
     val upNext = if (currentIndex >= 0) entries.drop(currentIndex + 1) else emptyList()
+    val playedHistory by app.history.history.collectAsState()
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(Modifier.fillMaxWidth()) {
-            if (history.isNotEmpty()) {
-                item { QueueSectionTitle("History") }
-                items(history, key = { "h:${it.index}" }) { row ->
-                    QueueRowItem(row, controller, onDismiss)
-                }
-            }
             if (upNext.isNotEmpty()) {
                 item { QueueSectionTitle("Playing Next") }
                 items(upNext, key = { "n:${it.index}" }) { row ->
                     QueueRowItem(row, controller, onDismiss)
                 }
             }
-            if (history.isEmpty() && upNext.isEmpty()) {
+            if (playedHistory.isNotEmpty()) {
+                item { QueueSectionTitle("History") }
+                items(playedHistory, key = { "h:${it.itemId}:${it.songId}" }) { played ->
+                    HistoryRowItem(
+                        played = played,
+                        coverUrl = played.itemId.takeIf { it.isNotBlank() }
+                            ?.let { app.repository.coverUrl(it) },
+                        onClick = {
+                            controller?.playEpisode(played.itemId, played.songId)
+                            onDismiss()
+                        },
+                    )
+                }
+            }
+            if (upNext.isEmpty() && playedHistory.isEmpty()) {
                 item {
                     Text(
-                        "Nothing else in this queue yet.",
+                        "Nothing here yet — play some music.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(24.dp),
@@ -370,6 +488,51 @@ private fun QueueSheet(
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun HistoryRowItem(
+    played: PlayedSong,
+    coverUrl: String?,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+    ) {
+        CoverImage(
+            model = coverUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(6.dp)),
+        )
+        Column(
+            Modifier
+                .weight(1f)
+                .padding(start = 12.dp),
+        ) {
+            Text(
+                played.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (played.artist.isNotBlank()) {
+                Text(
+                    played.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -442,55 +605,6 @@ private fun QueueRowItem(
 }
 
 @Composable
-private fun SpeedSelector(state: PlayerUiState, controller: MediaController?) {
-    var menuOpen by remember { mutableStateOf(false) }
-
-    Box {
-        OutlinedButton(onClick = { menuOpen = true }) {
-            Icon(
-                Icons.Filled.Speed,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(formatSpeed(state.speed))
-        }
-        DropdownMenu(
-            expanded = menuOpen,
-            onDismissRequest = { menuOpen = false },
-        ) {
-            SPEED_OPTIONS.forEach { speed ->
-                val selected = kotlin.math.abs(state.speed - speed) < 0.01f
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            formatSpeed(speed),
-                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        )
-                    },
-                    trailingIcon = if (selected) {
-                        {
-                            Icon(
-                                Icons.Filled.Check,
-                                contentDescription = "Selected",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    } else {
-                        null
-                    },
-                    onClick = {
-                        controller?.setPlaybackSpeed(speed)
-                        menuOpen = false
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun SeekBar(state: PlayerUiState, controller: MediaController?) {
     var dragPosition by remember { mutableStateOf<Float?>(null) }
     val duration = state.durationMs.coerceAtLeast(1L)
@@ -523,9 +637,6 @@ private fun SeekBar(state: PlayerUiState, controller: MediaController?) {
         }
     }
 }
-
-private fun formatSpeed(speed: Float): String =
-    if (speed == speed.toInt().toFloat()) "${speed.toInt()}x" else "${speed}x"
 
 @Composable
 fun NowPlayingBar(
@@ -570,8 +681,8 @@ fun NowPlayingBar(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        IconButton(onClick = { controller?.seekBack() }) {
-            Icon(Icons.Filled.Replay10, contentDescription = "Back 10 seconds")
+        IconButton(onClick = { controller?.seekToPrevious() }) {
+            Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous")
         }
         IconButton(onClick = { controller?.let { if (it.isPlaying) it.pause() else it.play() } }) {
             if (state.isLoading) {
@@ -584,8 +695,8 @@ fun NowPlayingBar(
                 )
             }
         }
-        IconButton(onClick = { controller?.seekForward() }) {
-            Icon(Icons.Filled.Forward30, contentDescription = "Forward 30 seconds")
+        IconButton(onClick = { controller?.seekToNext() }) {
+            Icon(Icons.Filled.SkipNext, contentDescription = "Next")
         }
     }
 }

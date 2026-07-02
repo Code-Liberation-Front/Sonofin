@@ -70,4 +70,8 @@ interface AbsApi {
 
     @POST("Sessions/Playing/Progress")
     suspend fun reportProgress(@Body body: JfProgressBody)
+
+    /** Embedded or sidecar lyrics for a song (404 when none exist). */
+    @GET("Audio/{itemId}/Lyrics")
+    suspend fun lyrics(@Path("itemId") itemId: String): JfLyrics
 }

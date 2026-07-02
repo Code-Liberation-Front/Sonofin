@@ -455,6 +455,15 @@ class AbsRepository(
 
     suspend fun mix(id: String): Mix? = madeForYou().firstOrNull { it.id == id }
 
+    data class LyricLine(val text: String, val startMs: Long?)
+
+    /** Lyrics for a song from Jellyfin; empty when the server has none. */
+    suspend fun lyrics(songId: String): List<LyricLine> = runCatching {
+        requireApi().lyrics(songId).lyrics.map { line ->
+            LyricLine(text = line.text.orEmpty(), startMs = line.start?.let { it / 10_000 })
+        }
+    }.getOrDefault(emptyList())
+
     /** A fresh random sample of songs, used for autoplay continuation. */
     suspend fun randomSongs(limit: Int = 25): List<PodcastEpisode> =
         requireApi().items(

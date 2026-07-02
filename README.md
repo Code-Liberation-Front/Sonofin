@@ -20,8 +20,8 @@ Sonofin connects to your self-hosted [Jellyfin](https://jellyfin.org/) server an
 - **Browse your music library** — album cover-art grid, track lists with track numbers and durations
 - **Stream tracks** with background playback, media notification, lockscreen/Bluetooth controls
 - **Android Auto** — browse albums and songs and control playback from your car
-- **Playback speed** from 0.75x to 3x
-- **Skip controls** — 30s forward, 10s back
+- **Lyrics** — synced, auto-scrolling lyrics from Jellyfin in the player (tap a line to seek)
+- **History** — the player's queue sheet keeps your last 50 played songs
 - **Play-state sync** — played tracks are marked back to Jellyfin so your "played" badges and Recently Played stay in sync across devices
 
 ## Download
