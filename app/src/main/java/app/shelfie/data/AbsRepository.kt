@@ -713,7 +713,7 @@ class AbsRepository(
     }
 
     companion object {
-        private const val CLIENT_VERSION = "0.1.0"
+        private const val CLIENT_VERSION = "1"
 
         /** A seed that changes once a day, so generated shelves are stable while browsing. */
         private fun daySeed(): Int = (System.currentTimeMillis() / 86_400_000L).toInt()

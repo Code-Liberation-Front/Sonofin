@@ -74,7 +74,7 @@ Requirements: JDK 17+ and the Android SDK (API 35).
 - **Retrofit + kotlinx.serialization** client for the Jellyfin REST API (`/Users/AuthenticateByName`, `/Users/{id}/Views`, `/Items`, `/Audio/{id}/stream`, `/Sessions/Playing/Progress`)
 - **DataStore** for server credentials and the device id
 
-> Internal package and class names still use the `shelfie` prefix — Sonofin started life as a fork of the Shelfie Audiobookshelf client. It ships as a brand-new Play listing, though, with its own application id (`app.sonofin`) and versioning starting at `0.1.0` (versionCode 1). The app maps Jellyfin's albums/tracks onto the older "podcast/episode" type names in the data layer; everything the user sees is music terminology.
+> Internal package and class names still use the `shelfie` prefix — Sonofin started life as a fork of the Shelfie Audiobookshelf client. It ships as a brand-new Play listing, though, with its own application id (`com.sonofin.zbuddy`) and versioning starting at `1` (versionCode 1). The app maps Jellyfin's albums/tracks onto the older "podcast/episode" type names in the data layer; everything the user sees is music terminology.
 
 ## License
 
