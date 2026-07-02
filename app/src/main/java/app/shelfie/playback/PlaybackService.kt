@@ -1142,12 +1142,15 @@ class PlaybackService : MediaLibraryService() {
         episode.pubDate?.let { extras.putString(EXTRA_PUB_DATE, it) }
         val metadata = MediaMetadata.Builder()
             .setTitle(episode.title ?: "Song")
-            .setArtist(podcast.media.metadata.title)
+            .setArtist(
+                episode.subtitle?.takeIf { it.isNotBlank() }
+                    ?: podcast.media.metadata.displayAuthor,
+            )
             .setAlbumTitle(podcast.media.metadata.title)
             .setArtworkUri(Uri.parse(repo.coverUrl(podcast.id)))
             .setIsBrowsable(false)
             .setIsPlayable(true)
-            .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
             .setExtras(extras)
             .build()
         val builder = MediaItem.Builder()

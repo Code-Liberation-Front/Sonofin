@@ -201,6 +201,14 @@ fun MainNavigation(app: ShelfieApp, controller: MediaController?) {
                 state = playerState,
                 controller = controller,
                 onBack = { playerExpanded = false },
+                onOpenAlbum = { itemId ->
+                    playerExpanded = false
+                    navController.navigate("podcast/$itemId")
+                },
+                onOpenArtist = { name ->
+                    playerExpanded = false
+                    navController.navigate("artist/${Uri.encode(name)}")
+                },
             )
         }
     }

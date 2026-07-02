@@ -21,8 +21,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Forward30
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -71,6 +73,8 @@ fun PlayerScreen(
     state: PlayerUiState,
     controller: MediaController?,
     onBack: () -> Unit,
+    onOpenAlbum: (String) -> Unit = {},
+    onOpenArtist: (String) -> Unit = {},
 ) {
     // Swipe-down to dismiss: once the scrollable content is at the top, further
     // downward drag translates the whole player; past a threshold (or on a fast
@@ -158,13 +162,56 @@ fun PlayerScreen(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
-        Text(
-            state.artist,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (state.artist.isNotBlank()) {
+            var artistMenuOpen by remember { mutableStateOf(false) }
+            Box {
+                Text(
+                    state.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable { artistMenuOpen = true },
+                )
+                DropdownMenu(
+                    expanded = artistMenuOpen,
+                    onDismissRequest = { artistMenuOpen = false },
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    val albumId = state.mediaId
+                        ?.takeIf { it.startsWith("episode:") }
+                        ?.split(":", limit = 3)
+                        ?.getOrNull(1)
+                    if (albumId != null) {
+                        DropdownMenuItem(
+                            text = { Text("Go to album") },
+                            leadingIcon = { Icon(Icons.Filled.Album, contentDescription = null) },
+                            onClick = {
+                                artistMenuOpen = false
+                                onOpenAlbum(albumId)
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Go to artist") },
+                        leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
+                        onClick = {
+                            artistMenuOpen = false
+                            onOpenArtist(state.artist)
+                        },
+                    )
+                }
+            }
+        }
+        if (state.albumTitle.isNotBlank() && state.albumTitle != state.artist) {
+            Text(
+                state.albumTitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         if (state.publishDate.isNotBlank()) {
             Text(
                 state.publishDate,
