@@ -106,9 +106,21 @@ fun SongsScreen(
             }
             if (cachedFirst.isNotEmpty()) {
                 songs = cachedFirst
-                total = cachedFirst.size
+                // The persisted total keeps pagination working on cache-only visits.
+                total = maxOf(
+                    cachedFirst.size,
+                    withContext(Dispatchers.IO) {
+                        runCatching { app.repository.cachedSongsTotal() }.getOrDefault(0)
+                    },
+                )
                 initialLoading = false
             }
+        }
+        // Like Home/Library: revalidate once per app session, then serve the
+        // cache until the user manually refreshes.
+        if (refreshKey == 0 && songs.isNotEmpty() && !claimSessionRefresh("songs")) {
+            initialLoading = false
+            return@LaunchedEffect
         }
         refreshing = true
         loadPage(0)

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PlaylistAddCheck
 import androidx.compose.material.icons.filled.PlaylistRemove
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -258,15 +259,25 @@ fun PlaylistScreen(
             ) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
-                Text("Play all (${rows.size})")
+                Text("Play", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Button(
+                onClick = { controller?.playEntries(rows.shuffled(), 0) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Filled.Shuffle, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Shuffle", maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (selectedId != DOWNLOADED_PLAYLIST_ID) {
-                OutlinedButton(
+                IconButton(
                     onClick = { bulkDownloadByIds(app, scope, rows.map { it.itemId to it.episodeId }) },
                 ) {
-                    Icon(Icons.Filled.Download, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Download all")
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = "Download all",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
                 }
             }
         }

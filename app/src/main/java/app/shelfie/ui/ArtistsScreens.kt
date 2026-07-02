@@ -69,6 +69,7 @@ fun ArtistsScreen(
     var refreshKey by remember { mutableIntStateOf(0) }
     val artists = rememberServerData(
         refreshKey = refreshKey,
+        sessionKey = "artists",
         cached = { artistsFromAlbums(app.repository.cachedAlbums()).ifEmpty { null } },
         fetch = {
             if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
@@ -175,6 +176,7 @@ fun ArtistDetailScreen(
     val albumsState = rememberServerData(
         key = artistName,
         refreshKey = refreshKey,
+        sessionKey = "artist:$artistName",
         cached = { albumsForArtist(app.repository.cachedAlbums(), artistName).ifEmpty { null } },
         fetch = {
             if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")

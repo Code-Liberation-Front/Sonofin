@@ -149,8 +149,15 @@ private val BOTTOM_TABS = listOf(
 )
 
 // Pushed pages that keep the app chrome (top bar + tab bar), like Apple Music.
-private val LIBRARY_SUB_ROUTES =
-    setOf("playlists", "playlist/{playlistId}", "artists", "artist/{name}", "albums", "songs")
+private val LIBRARY_SUB_ROUTES = setOf(
+    "playlists",
+    "playlist/{playlistId}",
+    "artists",
+    "artist/{name}",
+    "albums",
+    "songs",
+    "podcast/{itemId}",
+)
 
 /** Which bottom tab a route belongs to, or null for full-screen pages. */
 private fun tabForRoute(route: String?): String? = when {

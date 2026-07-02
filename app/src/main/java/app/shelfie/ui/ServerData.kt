@@ -41,6 +41,14 @@ class ServerDataState<T : Any> {
 private val sessionRefreshed = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
 /**
+ * Marks [sessionKey] as refreshed for this app session; returns true when
+ * this call did the marking (i.e. the key still needed its session refresh).
+ * For screens with bespoke loading (e.g. paged lists) that can't use
+ * [rememberServerData].
+ */
+fun claimSessionRefresh(sessionKey: String): Boolean = sessionRefreshed.add(sessionKey)
+
+/**
  * Loads screen data cache-first, then revalidates against the server.
  *
  * [key] is the identity of the data (e.g. an item id) — changing it resets

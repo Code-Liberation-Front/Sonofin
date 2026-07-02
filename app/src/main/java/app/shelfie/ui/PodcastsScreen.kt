@@ -61,6 +61,7 @@ fun PodcastsScreen(
     var refreshKey by remember { mutableIntStateOf(0) }
     val albums = rememberServerData(
         refreshKey = refreshKey,
+        sessionKey = "albums",
         cached = { app.repository.cachedAlbums().ifEmpty { null } },
         fetch = {
             if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")

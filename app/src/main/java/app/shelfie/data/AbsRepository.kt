@@ -331,7 +331,12 @@ class AbsRepository(
             SongsPage(
                 songs = response.items.map { toEpisode(it, it.albumId ?: "") },
                 total = response.totalRecordCount,
-            ).also { if (startIndex == 0) diskCacheWrite("songs_page0.json", it.songs) }
+            ).also {
+                if (startIndex == 0) {
+                    diskCacheWrite("songs_page0.json", it.songs)
+                    diskCacheWrite("songs_total.json", it.total)
+                }
+            }
         } catch (e: Exception) {
             if (startIndex == 0) {
                 diskCacheRead<List<PodcastEpisode>>("songs_page0.json")
@@ -483,6 +488,9 @@ class AbsRepository(
 
     fun cachedSongsFirstPage(): List<PodcastEpisode> =
         diskCacheRead<List<PodcastEpisode>>("songs_page0.json").orEmpty()
+
+    /** The library's song count as of the last first-page fetch. */
+    fun cachedSongsTotal(): Int = diskCacheRead<Int>("songs_total.json") ?: 0
 
     /** Newest tracks added to the library, latest first. */
     suspend fun latestEpisodes(limit: Int = 75, forceRefresh: Boolean = false): List<PodcastEpisode> {
