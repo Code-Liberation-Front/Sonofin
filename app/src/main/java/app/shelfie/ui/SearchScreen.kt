@@ -46,10 +46,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private data class SearchResults(
+    val artists: List<ArtistRow>,
     val podcasts: List<LibraryItemSummary>,
     val episodes: List<Pair<LibraryItemExpanded, PodcastEpisode>>,
 ) {
-    val isEmpty: Boolean get() = podcasts.isEmpty() && episodes.isEmpty()
+    val isEmpty: Boolean get() = artists.isEmpty() && podcasts.isEmpty() && episodes.isEmpty()
 }
 
 @Composable
@@ -59,6 +60,7 @@ fun SearchScreen(
     onOpenPodcast: (String) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean = true,
+    onOpenArtist: (String) -> Unit = {},
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
@@ -87,7 +89,12 @@ fun SearchScreen(
         val outcome = withContext(Dispatchers.IO) {
             runCatching {
                 val (podcasts, episodes) = app.repository.search(query)
-                SearchResults(podcasts, episodes)
+                // Artist matches come from grouping the album library locally.
+                val albums = app.repository.cachedAlbums()
+                    .ifEmpty { runCatching { app.repository.podcasts() }.getOrDefault(emptyList()) }
+                val artists = artistsFromAlbums(albums)
+                    .filter { it.name.contains(query.trim(), ignoreCase = true) }
+                SearchResults(artists, podcasts, episodes)
             }
         }
         outcome.fold(
@@ -150,6 +157,16 @@ fun SearchScreen(
 
             else -> results?.let { found ->
                 LazyColumn(Modifier.fillMaxSize()) {
+                    if (found.artists.isNotEmpty()) {
+                        item { SearchSectionTitle("Artists") }
+                        items(found.artists, key = { "a:${it.name}" }) { artist ->
+                            ArtistResultRow(
+                                artist = artist,
+                                coverUrl = app.repository.coverUrl(artist.coverAlbumId),
+                                onClick = { onOpenArtist(artist.name) },
+                            )
+                        }
+                    }
                     if (found.podcasts.isNotEmpty()) {
                         item { SearchSectionTitle("Albums") }
                         items(found.podcasts, key = { "p:${it.id}" }) { podcast ->
@@ -224,6 +241,39 @@ private fun SearchSectionTitle(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
     )
+}
+
+@Composable
+private fun ArtistResultRow(artist: ArtistRow, coverUrl: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        CoverImage(
+            model = coverUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape),
+        )
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(
+                artist.name,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (artist.albumCount == 1) "Artist • 1 album" else "Artist • ${artist.albumCount} albums",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable

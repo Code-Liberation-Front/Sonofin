@@ -306,6 +306,7 @@ private fun MainScaffold(
                         onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
                         onBack = {},
                         showBack = false,
+                        onOpenArtist = { name -> navController.navigate("artist/${Uri.encode(name)}") },
                     )
                 }
             }
