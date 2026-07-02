@@ -167,7 +167,7 @@ fun SettingsScreen(app: ShelfieApp, onOpenDownloads: () -> Unit, onBack: () -> U
                 Column(Modifier.weight(1f)) {
                     Text("Auto play", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "Continue to the next track automatically",
+                        "Keep playing random songs when the queue ends",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

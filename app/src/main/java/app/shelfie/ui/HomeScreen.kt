@@ -65,9 +65,9 @@ fun HomeScreen(
     onOpenMix: (String) -> Unit,
 ) {
     var refreshKey by remember { mutableIntStateOf(0) }
-    val progressRevision by app.repository.progressRevision.collectAsState()
     val shelves = rememberServerData(
-        refetchKey = refreshKey to progressRevision,
+        refreshKey = refreshKey,
+        sessionKey = "home",
         cached = {
             HomeShelves(
                 topPicks = app.repository.cachedTopPicks(),

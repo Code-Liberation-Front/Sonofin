@@ -150,6 +150,14 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
 
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                maybeExtendQueue()
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) maybeExtendQueue()
+            }
+
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
                 // The effect is bound to the audio session; re-attach on changes.
                 serviceScope.launch {
@@ -252,6 +260,59 @@ class PlaybackService : MediaLibraryService() {
         player.release()
         super.onDestroy()
     }
+
+    // region autoplay continuation
+
+    private var extendingQueue = false
+
+    /**
+     * Random continuation: when the autoplay setting is on and the queue is on
+     * its last song, appends a batch of random library songs so playback keeps
+     * going after the album/playlist/mix finishes. Audiobook tracks are left
+     * alone, and the appended items are fully resolved (with URIs) since they
+     * bypass the session's item-resolution callbacks.
+     */
+    private fun maybeExtendQueue() {
+        val current = activePlayer ?: return
+        if (current.mediaItemCount == 0) return
+        if (current.currentMediaItemIndex < current.mediaItemCount - 1) return
+        val currentId = current.currentMediaItem?.mediaId ?: return
+        if (!currentId.startsWith(EPISODE_PREFIX)) return
+        if (extendingQueue) return
+        extendingQueue = true
+        serviceScope.launch {
+            try {
+                if (!runCatching { app.settings.autoPlayEnabled() }.getOrDefault(true)) return@launch
+                val existing = (0 until current.mediaItemCount)
+                    .map { current.getMediaItemAt(it).mediaId }
+                    .toSet()
+                val items = withContext(Dispatchers.IO) {
+                    runCatching {
+                        if (!repo.ensureConfigured()) return@runCatching emptyList<MediaItem>()
+                        repo.randomSongs(25)
+                            .filter { it.libraryItemId.isNotBlank() && it.id.isNotBlank() }
+                            .filter { "$EPISODE_PREFIX${it.libraryItemId}:${it.id}" !in existing }
+                            .take(10)
+                            .map { songItem(it, withUri = true) }
+                    }.getOrDefault(emptyList())
+                }
+                if (items.isEmpty()) return@launch
+                val wasEnded = current.playbackState == Player.STATE_ENDED
+                val resumeIndex = current.mediaItemCount
+                current.addMediaItems(items)
+                // If the queue already finished while we were fetching, kick
+                // playback into the first appended song.
+                if (wasEnded) {
+                    current.seekTo(resumeIndex, 0)
+                    current.play()
+                }
+            } finally {
+                extendingQueue = false
+            }
+        }
+    }
+
+    // endregion
 
     // region progress sync
 
@@ -735,14 +796,10 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /**
-     * Builds the queue for a selected episode, resuming from the server-side
-     * position when no explicit position was requested.
-     *
-     * Auto-play direction: picking an older episode continues forward in time
-     * (e.g. 695 → 696 → 697); picking the newest episode walks backwards
-     * (700 → 699 → 698). Either way the queue stops before the first episode
-     * that has already been fully played. With auto-play disabled in settings,
-     * only the selected episode is queued.
+     * Builds the queue for a selected song: the rest of its album in
+     * disc/track order, starting at the tapped song — regardless of the
+     * autoplay setting (autoplay only controls what happens after the album
+     * ends; see [maybeExtendQueue]).
      */
     private suspend fun podcastQueueFor(
         mediaId: String,
@@ -764,12 +821,9 @@ class PlaybackService : MediaLibraryService() {
             }
             return MediaSession.MediaItemsWithStartPosition(listOf(downloaded), 0, position)
         }
-        val autoPlay = runCatching { app.settings.autoPlayEnabled() }.getOrDefault(true)
-        val episodes = if (autoPlay) {
-            buildAutoPlayQueue(podcast, parts[2])
-        } else {
-            podcast.media.episodes.filter { it.id == parts[2] }
-        }
+        val ordered = podcast.media.episodes.sortedByAlbumOrder()
+        val start = ordered.indexOfFirst { it.id == parts[2] }
+        val episodes = if (start >= 0) ordered.drop(start) else ordered.filter { it.id == parts[2] }
         if (episodes.isEmpty()) {
             return MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0)
         }
@@ -779,27 +833,6 @@ class PlaybackService : MediaLibraryService() {
             position = savedPositionMs(mediaId)
         }
         return MediaSession.MediaItemsWithStartPosition(queue, 0, position)
-    }
-
-    private suspend fun buildAutoPlayQueue(
-        podcast: LibraryItemExpanded,
-        episodeId: String,
-    ): List<PodcastEpisode> {
-        val chronological = podcast.media.episodes.sortedByAlbumOrder()
-        val start = chronological.indexOfFirst { it.id == episodeId }
-        if (start == -1) return emptyList()
-        val direction = if (start == chronological.lastIndex) -1 else +1
-        val queue = mutableListOf(chronological[start])
-        var index = start + direction
-        while (index in chronological.indices) {
-            val episode = chronological[index]
-            val finished = runCatching { repo.progress(podcast.id, episode.id) }
-                .getOrNull()?.isFinished == true
-            if (finished) break
-            queue.add(episode)
-            index += direction
-        }
-        return queue
     }
 
     /** Looks up the server-side resume position for an episode media id. */

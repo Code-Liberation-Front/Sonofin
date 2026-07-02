@@ -149,7 +149,8 @@ private val BOTTOM_TABS = listOf(
 )
 
 // Pushed pages that keep the app chrome (top bar + tab bar), like Apple Music.
-private val LIBRARY_SUB_ROUTES = setOf("playlists", "artists", "artist/{name}", "albums", "songs")
+private val LIBRARY_SUB_ROUTES =
+    setOf("playlists", "playlist/{playlistId}", "artists", "artist/{name}", "albums", "songs")
 
 /** Which bottom tab a route belongs to, or null for full-screen pages. */
 private fun tabForRoute(route: String?): String? = when {
@@ -355,11 +356,20 @@ private fun MainScaffold(
                 )
             }
             composable("playlists") {
+                PlaylistsScreen(
+                    app = app,
+                    onBack = { navController.popBackStack() },
+                    onOpenPlaylist = { id -> navController.navigate("playlist/${Uri.encode(id)}") },
+                )
+            }
+            composable("playlist/{playlistId}") { entry ->
                 PlaylistScreen(
                     app = app,
                     controller = controller,
                     playerState = playerState,
                     onOpenPodcast = { itemId -> navController.navigate("podcast/$itemId") },
+                    playlistId = entry.arguments?.getString("playlistId").orEmpty(),
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable("settings") {

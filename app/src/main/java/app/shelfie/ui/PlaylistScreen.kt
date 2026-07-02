@@ -1,8 +1,9 @@
 package app.shelfie.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PlaylistAddCheck
@@ -96,6 +98,8 @@ fun PlaylistScreen(
     controller: MediaController?,
     playerState: PlayerUiState,
     onOpenPodcast: (String) -> Unit,
+    playlistId: String = DOWNLOADED_PLAYLIST_ID,
+    onBack: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val playlists by app.playlist.playlists.collectAsState()
@@ -103,8 +107,7 @@ fun PlaylistScreen(
     val activeDownloads by app.downloads.active.collectAsState()
     val pins by app.pins.pins.collectAsState()
     val progressRevision by app.repository.progressRevision.collectAsState()
-    var selectedId by rememberSaveable { mutableStateOf(DOWNLOADED_PLAYLIST_ID) }
-    var showCreateDialog by remember { mutableStateOf(false) }
+    val selectedId = playlistId
     var addingToPlaylist by remember { mutableStateOf<String?>(null) }
     var pickerEntry by remember { mutableStateOf<PlaylistEntry?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -121,10 +124,10 @@ fun PlaylistScreen(
         }
     }
 
-    // Fall back to the Downloaded playlist if the selected one was deleted.
+    // Leave the page if this playlist was deleted.
     LaunchedEffect(playlists, selectedId) {
         if (selectedId != DOWNLOADED_PLAYLIST_ID && playlists.none { it.id == selectedId }) {
-            selectedId = DOWNLOADED_PLAYLIST_ID
+            onBack()
         }
     }
 
@@ -191,38 +194,19 @@ fun PlaylistScreen(
         Column(Modifier.fillMaxSize()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 4.dp),
         ) {
-            FilterChip(
-                selected = selectedId == DOWNLOADED_PLAYLIST_ID,
-                onClick = { selectedId = DOWNLOADED_PLAYLIST_ID },
-                label = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.DownloadDone,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text("Downloaded")
-                    }
-                },
-            )
-            playlists.forEach { playlist ->
-                FilterChip(
-                    selected = selectedId == playlist.id,
-                    onClick = { selectedId = playlist.id },
-                    label = { Text(playlist.name) },
-                )
-            }
-            IconButton(onClick = { showCreateDialog = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "New playlist")
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
         }
+        Text(
+            if (selectedId == DOWNLOADED_PLAYLIST_ID) "Downloaded" else selectedPlaylist?.name ?: "Playlist",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
 
         if (selectedPlaylist != null) {
             Row(
@@ -375,13 +359,146 @@ fun PlaylistScreen(
         }
     }
 
+}
+
+/**
+ * The Playlists landing page: an album-style grid with the Downloaded
+ * playlist first (download icon as its cover), then the user's playlists.
+ */
+@Composable
+fun PlaylistsScreen(
+    app: ShelfieApp,
+    onBack: () -> Unit,
+    onOpenPlaylist: (String) -> Unit,
+) {
+    val playlists by app.playlist.playlists.collectAsState()
+    val downloaded by app.downloads.completed.collectAsState()
+    var showCreateDialog by remember { mutableStateOf(false) }
+
     if (showCreateDialog) {
         CreatePlaylistDialog(
             onCreate = { name ->
-                selectedId = app.playlist.create(name)
+                val id = app.playlist.create(name)
                 showCreateDialog = false
+                onOpenPlaylist(id)
             },
             onDismiss = { showCreateDialog = false },
+        )
+    }
+
+    val cards = buildList {
+        add(
+            PlaylistCardData(
+                id = DOWNLOADED_PLAYLIST_ID,
+                name = "Downloaded",
+                subtitle = "${downloaded.size} songs",
+                coverItemId = null,
+            ),
+        )
+        playlists.forEach { playlist ->
+            add(
+                PlaylistCardData(
+                    id = playlist.id,
+                    name = playlist.name,
+                    subtitle = "${playlist.entries.size} songs",
+                    coverItemId = playlist.entries.firstOrNull()?.itemId,
+                ),
+            )
+        }
+    }
+
+    LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { showCreateDialog = true }) {
+                        Icon(Icons.Filled.Add, contentDescription = "New playlist")
+                    }
+                }
+                Text("Playlists", style = MaterialTheme.typography.headlineMedium)
+            }
+        }
+        items(cards.chunked(2), key = { it.first().id }) { pair ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                pair.forEach { card ->
+                    PlaylistCard(
+                        app = app,
+                        card = card,
+                        onClick = { onOpenPlaylist(card.id) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (pair.size == 1) Box(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+private data class PlaylistCardData(
+    val id: String,
+    val name: String,
+    val subtitle: String,
+    /** Album id whose cover art fronts the playlist; null shows an icon instead. */
+    val coverItemId: String?,
+)
+
+@Composable
+private fun PlaylistCard(
+    app: ShelfieApp,
+    card: PlaylistCardData,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.clickable(onClick = onClick)) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            if (card.coverItemId != null) {
+                CoverImage(
+                    model = app.repository.coverUrl(card.coverItemId),
+                    contentDescription = card.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    if (card.id == DOWNLOADED_PLAYLIST_ID) Icons.Filled.Download else Icons.Filled.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(56.dp),
+                )
+            }
+        }
+        Text(
+            card.name,
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+        Text(
+            card.subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

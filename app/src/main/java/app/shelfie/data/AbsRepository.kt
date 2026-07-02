@@ -450,6 +450,17 @@ class AbsRepository(
 
     suspend fun mix(id: String): Mix? = madeForYou().firstOrNull { it.id == id }
 
+    /** A fresh random sample of songs, used for autoplay continuation. */
+    suspend fun randomSongs(limit: Int = 25): List<PodcastEpisode> =
+        requireApi().items(
+            userId = requireUserId(),
+            parentId = activeLibraryId(),
+            includeItemTypes = "Audio",
+            recursive = true,
+            sortBy = "Random",
+            limit = limit,
+        ).items.map { toEpisode(it, it.albumId ?: "") }
+
     // ---- Cache-only accessors ----------------------------------------------
     // Memory first, then the persisted disk cache — never the network. Screens
     // paint these instantly, then revalidate against the server in the

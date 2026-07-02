@@ -188,7 +188,7 @@ fun MixScreen(
     var refreshKey by remember { mutableIntStateOf(0) }
     val mixState = rememberServerData(
         key = mixId,
-        refetchKey = refreshKey,
+        refreshKey = refreshKey,
         cached = { app.repository.cachedMixes().firstOrNull { it.id == mixId } },
         fetch = {
             if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")

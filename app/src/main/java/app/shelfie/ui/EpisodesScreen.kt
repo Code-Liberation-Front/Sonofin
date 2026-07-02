@@ -87,7 +87,8 @@ fun EpisodesScreen(
     val progressRevision by app.repository.progressRevision.collectAsState()
     val albumState = rememberServerData(
         key = itemId,
-        refetchKey = refreshKey to progressRevision,
+        refreshKey = refreshKey,
+        refetchKey = progressRevision,
         cached = {
             app.repository.cachedAlbum(itemId)?.let { EpisodesUi.Ready(it, buildAlbumRows(app, itemId, it)) }
         },

@@ -69,7 +69,8 @@ fun LibraryScreen(
     val pins by app.pins.pins.collectAsState()
     var refreshKey by remember { mutableIntStateOf(0) }
     val recentState = rememberServerData(
-        refetchKey = refreshKey,
+        refreshKey = refreshKey,
+        sessionKey = "library",
         cached = {
             app.repository.cachedAlbums()
                 .sortedByDescending { it.addedAt }

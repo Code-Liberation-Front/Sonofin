@@ -35,25 +35,44 @@ class ServerDataState<T : Any> {
 }
 
 /**
+ * Screens that revalidate only once per app session (until a manual pull):
+ * ids that already refreshed since process start.
+ */
+private val sessionRefreshed = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+/**
  * Loads screen data cache-first, then revalidates against the server.
  *
  * [key] is the identity of the data (e.g. an item id) — changing it resets
- * the state. [refetchKey] triggers a re-fetch without resetting (e.g. a
- * pull-to-refresh counter or progress revision). [cached] must be fast and
- * never touch the network; [fetch] is the authoritative server call.
+ * the state. [refreshKey] is the manual pull-to-refresh counter; [refetchKey]
+ * triggers a re-fetch without resetting (e.g. a progress revision). When
+ * [sessionKey] is set, the automatic revalidation runs only once per app
+ * session — after that the screen paints purely from cache until the user
+ * manually refreshes. [cached] must be fast and never touch the network;
+ * [fetch] is the authoritative server call.
  */
 @Composable
 fun <T : Any> rememberServerData(
     key: Any? = Unit,
+    refreshKey: Int = 0,
     refetchKey: Any? = Unit,
+    sessionKey: String? = null,
     cached: suspend () -> T?,
     fetch: suspend () -> T,
 ): ServerDataState<T> {
     val state = remember(key) { ServerDataState<T>() }
-    LaunchedEffect(key, refetchKey) {
+    LaunchedEffect(key, refreshKey, refetchKey) {
         if (state.data == null) {
             withContext(Dispatchers.IO) { runCatching { cached() }.getOrNull() }
                 ?.let { state.data = it }
+        }
+        // Session-scoped screens skip the automatic revalidation when they have
+        // cached content and already refreshed once this session.
+        if (sessionKey != null && refreshKey == 0 && state.data != null &&
+            !sessionRefreshed.add(sessionKey)
+        ) {
+            state.refreshing = false
+            return@LaunchedEffect
         }
         state.refreshing = true
         state.error = null
