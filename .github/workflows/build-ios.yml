@@ -1,0 +1,55 @@
+name: Build iOS
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec ios/project.yml --project ios
+
+      - name: Build (unsigned)
+        run: |
+          xcodebuild \
+            -project ios/Sonofin.xcodeproj \
+            -scheme Sonofin \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ios/build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R ios/build/Build/Products/Release-iphoneos/Sonofin.app Payload/
+          zip -qry sonofin-ios-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonofin-ios-unsigned-ipa
+          path: sonofin-ios-unsigned.ipa
+
+      - name: Attach to tagged release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: sonofin-ios-unsigned.ipa

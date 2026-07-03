@@ -1,0 +1,30 @@
+name: Sonofin
+options:
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+targets:
+  Sonofin:
+    type: application
+    platform: iOS
+    sources: [Sonofin]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sonofin.zbuddy
+        MARKETING_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: Sonofin/Info.plist
+      properties:
+        CFBundleDisplayName: Sonofin
+        CFBundleShortVersionString: "1"
+        CFBundleVersion: "1"
+        UIBackgroundModes: [audio]
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true

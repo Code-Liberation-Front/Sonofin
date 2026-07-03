@@ -58,6 +58,14 @@ Sonofin authenticates through Jellyfin's `Users/AuthenticateByName` endpoint and
 
 If you have more than one music library, switch between them in **Settings**.
 
+## iOS app
+
+A SwiftUI companion app lives in `ios/` with feature parity with the Android app: Jellyfin sign-in, the Home / Library / Search tabs (Top Picks, Recently Played, Made for You mixes, pins, playlists incl. Downloaded and Favorites), album/artist/songs browsing with context menus (play next, pin, add to playlist, download), the full-screen player (heart, synced lyrics, queue + last-50 history sheet), background audio with lock-screen controls, AirPlay, downloads for offline, and random autoplay continuation.
+
+- CI: the **Build iOS** workflow (macOS runner) generates the project with [XcodeGen](https://github.com/yonaskolb/XcodeGen) and uploads `sonofin-ios-unsigned.ipa`. The IPA is unsigned — install it with AltStore/SideStore/Sideloadly (which re-sign with your Apple ID), or open `ios/` in Xcode with your own signing team.
+- Locally: `brew install xcodegen && xcodegen generate --spec ios/project.yml --project ios`, then open `ios/Sonofin.xcodeproj`.
+- Not included: CarPlay (requires a CarPlay entitlement granted by Apple) and Chromecast (iOS uses AirPlay instead).
+
 ## Building locally
 
 Requirements: JDK 17+ and the Android SDK (API 35).
