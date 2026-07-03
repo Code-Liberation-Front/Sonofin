@@ -709,7 +709,10 @@ struct ArtistDetailView: View {
         .navigationTitle(artistName)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            let all: [Album] = client.cacheRead("albums.json") ?? ((try? await client.albums()) ?? [])
+            var all: [Album] = client.cacheRead("albums.json") ?? []
+            if all.isEmpty {
+                all = (try? await client.albums()) ?? []
+            }
             albums = all.filter {
                 let name = $0.artist.trimmingCharacters(in: .whitespaces)
                 return (name.isEmpty ? "Unknown Artist" : name) == artistName
