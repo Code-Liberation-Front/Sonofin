@@ -20,8 +20,9 @@ targets:
       path: Sonofin/Info.plist
       properties:
         CFBundleDisplayName: Sonofin
-        CFBundleShortVersionString: "1"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes: [audio]
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
