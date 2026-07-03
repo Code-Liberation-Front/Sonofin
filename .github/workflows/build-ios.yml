@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - 'claude/**'
+    paths:
+      - 'ios/**'
+      - '.github/workflows/build-ios.yml'
   workflow_dispatch:
 
 permissions:
