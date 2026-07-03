@@ -236,11 +236,19 @@ struct PlayShuffleRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onPlay) {
-                Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity)
+                HStack(spacing: 6) {
+                    Image(systemName: "play.fill")
+                    Text("Play").bold()
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             Button(action: onShuffle) {
-                Label("Shuffle", systemImage: "shuffle").frame(maxWidth: .infinity)
+                HStack(spacing: 6) {
+                    Image(systemName: "shuffle")
+                    Text("Shuffle").bold()
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
         }

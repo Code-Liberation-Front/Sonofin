@@ -26,7 +26,12 @@ struct PlayerView: View {
             .padding(.horizontal)
 
             if let song = player.currentSong {
-                CoverArt(url: client.imageURL(albumId: song.albumId), size: 300, corner: 16)
+                // Flexible artwork: shrinks on shorter screens so the transport
+                // and bottom icon rows always stay on screen.
+                CoverArtFlexible(url: client.imageURL(albumId: song.albumId), corner: 16)
+                    .frame(maxWidth: 320)
+                    .padding(.horizontal, 36)
+                    .layoutPriority(-1)
 
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -94,36 +99,40 @@ struct PlayerView: View {
                 .padding(.horizontal, 24)
 
                 // Transport
-                HStack(spacing: 48) {
+                HStack(spacing: 44) {
                     Button { player.previous() } label: {
-                        Image(systemName: "backward.fill").font(.system(size: 32))
+                        Image(systemName: "backward.fill").font(.system(size: 30))
                     }
                     Button { player.togglePlayPause() } label: {
                         Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 72))
+                            .font(.system(size: 64))
                     }
                     Button { player.next() } label: {
-                        Image(systemName: "forward.fill").font(.system(size: 32))
+                        Image(systemName: "forward.fill").font(.system(size: 30))
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
                 // Bottom row: lyrics, AirPlay, queue/history.
                 HStack {
                     Button { lyricsOpen = true } label: {
-                        Image(systemName: "quote.bubble").font(.title3)
+                        Image(systemName: "quote.bubble")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
                     }
                     Spacer()
                     AirPlayButton()
                         .frame(width: 44, height: 44)
                     Spacer()
                     Button { queueOpen = true } label: {
-                        Image(systemName: "list.bullet").font(.title3)
+                        Image(systemName: "list.bullet")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
                     }
                 }
-                .padding(.horizontal, 32)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 36)
+                .padding(.bottom, 8)
             } else {
                 Spacer()
                 Text("Nothing playing").foregroundColor(.secondary)
