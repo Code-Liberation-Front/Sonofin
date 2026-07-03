@@ -16,7 +16,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    # Needs Xcode 16+: current XcodeGen emits the Xcode 16 project format.
+    runs-on: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
