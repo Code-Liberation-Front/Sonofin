@@ -54,21 +54,17 @@ struct RootView: View {
     var body: some View {
         TabView(selection: $router.tab) {
             HomeView()
+                .withMiniPlayer { playerPresented = true }
                 .tabItem { Label("Home", systemImage: "house.fill") }
                 .tag(0)
             LibraryView()
+                .withMiniPlayer { playerPresented = true }
                 .tabItem { Label("Library", systemImage: "music.note.list") }
                 .tag(1)
             SearchView()
+                .withMiniPlayer { playerPresented = true }
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
                 .tag(2)
-        }
-        // Overlay sits just above the 49pt tab bar instead of intersecting it.
-        .overlay(alignment: .bottom) {
-            if player.currentSong != nil {
-                MiniPlayerBar(onExpand: { playerPresented = true })
-                    .padding(.bottom, 49)
-            }
         }
         .fullScreenCover(isPresented: $playerPresented) {
             PlayerView()
@@ -76,6 +72,18 @@ struct RootView: View {
     }
 }
 
+extension View {
+    /// Docks the mini player above the tab bar: applied inside each tab so
+    /// the system stacks it on top of the tab bar on every device, and tab
+    /// content automatically avoids it.
+    func withMiniPlayer(onExpand: @escaping () -> Void) -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            MiniPlayerBar(onExpand: onExpand)
+        }
+    }
+}
+
+/// Apple Music-style floating capsule: cover, title, play/pause, next.
 struct MiniPlayerBar: View {
     @EnvironmentObject private var player: PlayerManager
     @EnvironmentObject private var client: JellyfinClient
@@ -84,22 +92,28 @@ struct MiniPlayerBar: View {
     var body: some View {
         if let song = player.currentSong {
             HStack(spacing: 12) {
-                CoverArt(url: client.imageURL(albumId: song.albumId), size: 44, corner: 6)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(song.title).font(.subheadline).bold().lineLimit(1)
-                    Text(song.artist).font(.caption).foregroundColor(.secondary).lineLimit(1)
-                }
-                Spacer()
-                Button { player.previous() } label: { Image(systemName: "backward.fill") }
+                CoverArt(url: client.imageURL(albumId: song.albumId), size: 38, corner: 8)
+                Text(song.title)
+                    .font(.subheadline).bold()
+                    .lineLimit(1)
+                Spacer(minLength: 8)
                 Button { player.togglePlayPause() } label: {
                     Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .font(.title3)
+                        .foregroundColor(.primary)
                 }
-                Button { player.next() } label: { Image(systemName: "forward.fill") }
+                Button { player.next() } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.body)
+                        .foregroundColor(.primary)
+                }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.thinMaterial)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 4)
             .contentShape(Rectangle())
             .onTapGesture { onExpand() }
         }
