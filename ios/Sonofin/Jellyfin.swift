@@ -357,11 +357,13 @@ final class JellyfinClient: ObservableObject {
         return result
     }
 
-    /// An album's tracks in disc/track order.
+    /// An album's tracks in disc/track order. Recursive so folder-backed
+    /// albums (tracks nested under disc folders) also resolve.
     func albumSongs(albumId: String) async throws -> [Song] {
         let result = try await items([
             "ParentId": albumId,
             "IncludeItemTypes": "Audio",
+            "Recursive": "true",
             "SortBy": "ParentIndexNumber,IndexNumber,SortName",
             "SortOrder": "Ascending",
             "Fields": "Genres",

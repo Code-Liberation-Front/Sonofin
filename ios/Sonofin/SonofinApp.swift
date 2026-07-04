@@ -63,9 +63,11 @@ struct RootView: View {
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
                 .tag(2)
         }
-        .safeAreaInset(edge: .bottom) {
+        // Overlay sits just above the 49pt tab bar instead of intersecting it.
+        .overlay(alignment: .bottom) {
             if player.currentSong != nil {
                 MiniPlayerBar(onExpand: { playerPresented = true })
+                    .padding(.bottom, 49)
             }
         }
         .fullScreenCover(isPresented: $playerPresented) {

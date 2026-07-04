@@ -287,9 +287,7 @@ struct HomeView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 12) {
                                 ForEach(topPicks) { album in
-                                    Button {
-                                        path.append(Route.album(album.id))
-                                    } label: {
+                                    NavigationLink(value: Route.album(album.id)) {
                                         AlbumCard(album: album).frame(width: 160)
                                     }
                                     .buttonStyle(.plain)
@@ -326,9 +324,7 @@ struct HomeView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 12) {
                                 ForEach(mixes) { mix in
-                                    Button {
-                                        path.append(Route.mix(mix.id))
-                                    } label: {
+                                    NavigationLink(value: Route.mix(mix.id)) {
                                         VStack(alignment: .leading, spacing: 4) {
                                             ZStack(alignment: .bottomLeading) {
                                                 CoverArt(
@@ -364,9 +360,7 @@ struct HomeView: View {
             .navigationTitle("Home")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        path.append(Route.settings)
-                    } label: {
+                    NavigationLink(value: Route.settings) {
                         Image(systemName: "gearshape")
                     }
                 }
@@ -460,9 +454,7 @@ struct LibraryView: View {
                     SectionHeader(text: "Recently Added")
                     LazyVGrid(columns: columns, spacing: 16) {
                         ForEach(recentlyAdded) { album in
-                            Button {
-                                router.libraryPath.append(Route.album(album.id))
-                            } label: {
+                            NavigationLink(value: Route.album(album.id)) {
                                 AlbumCard(album: album)
                             }
                             .buttonStyle(.plain)
@@ -484,13 +476,30 @@ struct LibraryView: View {
                 if !recentlyAdded.isEmpty && !SessionRefresh.claim("library") { return }
                 recentlyAdded = (try? await client.recentlyAdded()) ?? recentlyAdded
             }
+            .task { await warmSubPages() }
+        }
+    }
+
+    /// Refreshes the sub-pages' caches in the background as soon as Library
+    /// opens, so Albums/Artists/Songs paint instantly (once per session).
+    private func warmSubPages() async {
+        guard SessionRefresh.claim("libraryWarm") else { return }
+        async let albumsResult = client.albums()
+        async let songsResult = client.songsPage(startIndex: 0)
+        let albumsOk = (try? await albumsResult) != nil
+        let songsOk = (try? await songsResult) != nil
+        // Mark the sub-pages fresh so they serve the warmed caches directly.
+        if albumsOk {
+            _ = SessionRefresh.claim("albums")
+            _ = SessionRefresh.claim("artists")
+        }
+        if songsOk {
+            _ = SessionRefresh.claim("songs")
         }
     }
 
     private func libraryLink(_ title: String, icon: String, route: Route) -> some View {
-        Button {
-            router.libraryPath.append(route)
-        } label: {
+        NavigationLink(value: route) {
             HStack {
                 Image(systemName: icon).foregroundColor(.accentColor).frame(width: 28)
                 Text(title).font(.headline).foregroundColor(.primary)
@@ -512,29 +521,18 @@ struct PinnedCard: View {
     let pin: PinnedItem
 
     var body: some View {
-        Button {
+        Group {
             if pin.kind == "song" {
-                let client = client
-                let player = player
-                let pin = pin
-                Task {
-                    let songs = sortedByAlbumOrder((try? await client.albumSongs(albumId: pin.id)) ?? [])
-                    if let index = songs.firstIndex(where: { $0.id == pin.songId }) {
-                        player.play(songs: songs, startIndex: index)
-                    }
+                Button {
+                    playPinnedSong()
+                } label: {
+                    cardLabel
                 }
             } else {
-                router.libraryPath.append(Route.album(pin.id))
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                CoverArt(url: client.imageURL(albumId: pin.id), size: 120, corner: 10)
-                Text(pin.title).font(.subheadline).bold().lineLimit(1)
-                if !pin.subtitle.isEmpty {
-                    Text(pin.subtitle).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                NavigationLink(value: Route.album(pin.id)) {
+                    cardLabel
                 }
             }
-            .frame(width: 120, alignment: .leading)
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -549,6 +547,29 @@ struct PinnedCard: View {
                 pins.remove(pin)
             } label: {
                 Label("Unpin", systemImage: "pin.slash")
+            }
+        }
+    }
+
+    private var cardLabel: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            CoverArt(url: client.imageURL(albumId: pin.id), size: 120, corner: 10)
+            Text(pin.title).font(.subheadline).bold().lineLimit(1)
+            if !pin.subtitle.isEmpty {
+                Text(pin.subtitle).font(.caption).foregroundColor(.secondary).lineLimit(1)
+            }
+        }
+        .frame(width: 120, alignment: .leading)
+    }
+
+    private func playPinnedSong() {
+        let client = client
+        let player = player
+        let pin = pin
+        Task {
+            let songs = sortedByAlbumOrder((try? await client.albumSongs(albumId: pin.id)) ?? [])
+            if let index = songs.firstIndex(where: { $0.id == pin.songId }) {
+                player.play(songs: songs, startIndex: index)
             }
         }
     }
@@ -568,9 +589,7 @@ struct AlbumsView: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(albums) { album in
-                    Button {
-                        router.libraryPath.append(Route.album(album.id))
-                    } label: {
+                    NavigationLink(value: Route.album(album.id)) {
                         AlbumCard(album: album)
                     }
                     .buttonStyle(.plain)
@@ -600,6 +619,8 @@ struct AlbumView: View {
 
     let albumId: String
     @State private var songs: [Song] = []
+    @State private var loading = true
+    @State private var loadError: String?
 
     var body: some View {
         List {
@@ -619,6 +640,24 @@ struct AlbumView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .listRowSeparator(.hidden)
+            }
+            if songs.isEmpty && loading {
+                Section {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .listRowSeparator(.hidden)
+                }
+            }
+            if let loadError, songs.isEmpty {
+                Section {
+                    Text(loadError)
+                        .font(.subheadline)
+                        .foregroundColor(.red)
+                        .listRowSeparator(.hidden)
+                }
             }
             Section {
                 ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
@@ -644,7 +683,13 @@ struct AlbumView: View {
             if songs.isEmpty {
                 songs = sortedByAlbumOrder(client.cacheRead("album_\(albumId).json") ?? [])
             }
-            songs = sortedByAlbumOrder((try? await client.albumSongs(albumId: albumId)) ?? songs)
+            do {
+                songs = sortedByAlbumOrder(try await client.albumSongs(albumId: albumId))
+                loadError = nil
+            } catch {
+                if songs.isEmpty { loadError = error.localizedDescription }
+            }
+            loading = false
         }
     }
 }
@@ -659,9 +704,7 @@ struct ArtistsView: View {
 
     var body: some View {
         List(artists) { artist in
-            Button {
-                router.libraryPath.append(Route.artist(artist.name))
-            } label: {
+            NavigationLink(value: Route.artist(artist.name)) {
                 HStack(spacing: 12) {
                     CoverArt(url: client.imageURL(albumId: artist.coverAlbumId), size: 48, corner: 24)
                     VStack(alignment: .leading, spacing: 2) {
@@ -669,8 +712,6 @@ struct ArtistsView: View {
                         Text(artist.albumCount == 1 ? "1 album" : "\(artist.albumCount) albums")
                             .font(.caption).foregroundColor(.secondary)
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right").foregroundColor(.secondary)
                 }
             }
         }
@@ -702,11 +743,12 @@ struct ArtistDetailView: View {
 
     var body: some View {
         ScrollView {
+            if albums.isEmpty {
+                ProgressView().padding(48)
+            }
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(albums) { album in
-                    Button {
-                        router.libraryPath.append(Route.album(album.id))
-                    } label: {
+                    NavigationLink(value: Route.album(album.id)) {
                         AlbumCard(album: album)
                     }
                     .buttonStyle(.plain)
@@ -827,9 +869,7 @@ struct PlaylistsView: View {
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
-                Button {
-                    router.libraryPath.append(Route.playlist("__downloaded__"))
-                } label: {
+                NavigationLink(value: Route.playlist("__downloaded__")) {
                     playlistCard(
                         name: "Downloaded",
                         subtitle: "\(downloads.completed.count) songs",
@@ -839,9 +879,7 @@ struct PlaylistsView: View {
                 }
                 .buttonStyle(.plain)
                 ForEach(playlists.playlists) { playlist in
-                    Button {
-                        router.libraryPath.append(Route.playlist(playlist.id))
-                    } label: {
+                    NavigationLink(value: Route.playlist(playlist.id)) {
                         playlistCard(
                             name: playlist.name,
                             subtitle: "\(playlist.entries.count) songs",
@@ -1124,9 +1162,7 @@ struct SearchView: View {
                 if !artists.isEmpty {
                     Section("Artists") {
                         ForEach(artists) { artist in
-                            Button {
-                                path.append(Route.artist(artist.name))
-                            } label: {
+                            NavigationLink(value: Route.artist(artist.name)) {
                                 HStack(spacing: 12) {
                                     CoverArt(url: client.imageURL(albumId: artist.coverAlbumId), size: 44, corner: 22)
                                     VStack(alignment: .leading) {
@@ -1142,9 +1178,7 @@ struct SearchView: View {
                 if !albums.isEmpty {
                     Section("Albums") {
                         ForEach(albums) { album in
-                            Button {
-                                path.append(Route.album(album.id))
-                            } label: {
+                            NavigationLink(value: Route.album(album.id)) {
                                 HStack(spacing: 12) {
                                     CoverArt(url: client.imageURL(albumId: album.id), size: 44, corner: 6)
                                     VStack(alignment: .leading) {
