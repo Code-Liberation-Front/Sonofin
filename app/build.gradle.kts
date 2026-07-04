@@ -14,7 +14,9 @@ android {
         applicationId = "com.sonofin.zbuddy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        // Play requires a strictly increasing versionCode; CI passes the
+        // workflow run number so every upload is unique.
+        versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
         versionName = "1"
     }
 
