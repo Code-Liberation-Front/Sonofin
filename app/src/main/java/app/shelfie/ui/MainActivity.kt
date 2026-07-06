@@ -256,10 +256,11 @@ private fun MainScaffold(
                             NavigationBarItem(
                                 selected = selectedTab == tab.route,
                                 onClick = {
+                                    // Tapping a tab always lands on that tab's
+                                    // main page, dropping any pushed sub-pages.
                                     navController.navigate(tab.route) {
-                                        popUpTo("home") { saveState = true }
+                                        popUpTo("home")
                                         launchSingleTop = true
-                                        restoreState = true
                                     }
                                 },
                                 icon = { Icon(tab.icon, contentDescription = tab.label) },

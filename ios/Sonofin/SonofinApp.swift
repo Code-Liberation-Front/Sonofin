@@ -52,7 +52,16 @@ struct RootView: View {
     @State private var playerPresented = false
 
     var body: some View {
-        TabView(selection: $router.tab) {
+        // Selecting a tab (including re-selecting the current one) resets that
+        // tab to its main page, like Apple Music.
+        let selection = Binding(
+            get: { router.tab },
+            set: { newTab in
+                router.tab = newTab
+                router.resetToRoot(newTab)
+            }
+        )
+        return TabView(selection: selection) {
             HomeView()
                 .withMiniPlayer { playerPresented = true }
                 .tabItem { Label("Home", systemImage: "house.fill") }

@@ -18,7 +18,18 @@ enum Route: Hashable {
 @MainActor
 final class Router: ObservableObject {
     @Published var tab = 0
+    @Published var homePath = NavigationPath()
     @Published var libraryPath = NavigationPath()
+    @Published var searchPath = NavigationPath()
+
+    /// Selecting a tab in the bottom bar always lands on its main page.
+    func resetToRoot(_ tab: Int) {
+        switch tab {
+        case 0: if !homePath.isEmpty { homePath = NavigationPath() }
+        case 1: if !libraryPath.isEmpty { libraryPath = NavigationPath() }
+        default: if !searchPath.isEmpty { searchPath = NavigationPath() }
+        }
+    }
 
     func openAlbumFromPlayer(_ albumId: String) {
         tab = 1
@@ -274,10 +285,9 @@ struct HomeView: View {
     @State private var topPicks: [Album] = []
     @State private var recentSongs: [Song] = []
     @State private var mixes: [Mix] = []
-    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack(path: $router.homePath) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     SectionHeader(text: "Top Picks for You")
@@ -1264,16 +1274,16 @@ struct MixView: View {
 struct SearchView: View {
     @EnvironmentObject private var client: JellyfinClient
     @EnvironmentObject private var player: PlayerManager
+    @EnvironmentObject private var router: Router
 
     @State private var query = ""
     @State private var albums: [Album] = []
     @State private var songs: [Song] = []
     @State private var artists: [ArtistEntry] = []
     @State private var searching = false
-    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack(path: $router.searchPath) {
             List {
                 if searching {
                     HStack {
@@ -1318,7 +1328,7 @@ struct SearchView: View {
                         ForEach(songs) { song in
                             SongRow(song: song, onTap: {
                                 playFromAlbum(song)
-                            }, onOpenAlbum: { path.append(Route.album($0)) }, onRemoveFromPlaylist: nil)
+                            }, onOpenAlbum: { router.searchPath.append(Route.album($0)) }, onRemoveFromPlaylist: nil)
                         }
                     }
                 }

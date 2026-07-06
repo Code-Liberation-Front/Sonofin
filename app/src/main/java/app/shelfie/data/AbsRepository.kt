@@ -354,15 +354,12 @@ class AbsRepository(
                 albums = response.items.map { it.toSummary() },
                 total = response.totalRecordCount,
             ).also {
-                if (startIndex == 0) {
-                    diskCacheWrite("albums_page0.json", it.albums)
-                    diskCacheWrite("albums_total.json", it.total)
-                }
+                mergePagedCache("albums_page0.json", "albums_total.json", startIndex, it.albums, it.total) { a -> a.id }
             }
         } catch (e: Exception) {
             if (startIndex == 0) {
                 diskCacheRead<List<LibraryItemSummary>>("albums_page0.json")
-                    ?.let { AlbumsPage(it, cachedAlbumsTotal()) } ?: throw e
+                    ?.let { AlbumsPage(it, maxOf(it.size, cachedAlbumsTotal())) } ?: throw e
             } else {
                 throw e
             }
@@ -388,15 +385,14 @@ class AbsRepository(
                 artists = response.items.map { JellyArtist(it.id, it.name ?: "Unknown Artist") },
                 total = response.totalRecordCount,
             ).also {
-                if (startIndex == 0 && searchTerm == null) {
-                    diskCacheWrite("artists_page0.json", it.artists)
-                    diskCacheWrite("artists_total.json", it.total)
+                if (searchTerm == null) {
+                    mergePagedCache("artists_page0.json", "artists_total.json", startIndex, it.artists, it.total) { a -> a.id }
                 }
             }
         } catch (e: Exception) {
             if (startIndex == 0 && searchTerm == null) {
                 diskCacheRead<List<JellyArtist>>("artists_page0.json")
-                    ?.let { ArtistsPage(it, diskCacheRead<Int>("artists_total.json") ?: it.size) } ?: throw e
+                    ?.let { ArtistsPage(it, maxOf(it.size, cachedArtistsTotal())) } ?: throw e
             } else {
                 throw e
             }
@@ -440,7 +436,7 @@ class AbsRepository(
      * library in one request times out on large servers, so the Songs screen
      * pages through with StartIndex/Limit as the user scrolls.
      */
-    suspend fun songsPage(startIndex: Int, limit: Int = 50): SongsPage {
+    suspend fun songsPage(startIndex: Int, limit: Int = 26): SongsPage {
         return try {
             val response = requireApi().items(
                 userId = requireUserId(),
@@ -456,15 +452,12 @@ class AbsRepository(
                 songs = response.items.map { toEpisode(it, it.albumId ?: "") },
                 total = response.totalRecordCount,
             ).also {
-                if (startIndex == 0) {
-                    diskCacheWrite("songs_page0.json", it.songs)
-                    diskCacheWrite("songs_total.json", it.total)
-                }
+                mergePagedCache("songs_page0.json", "songs_total.json", startIndex, it.songs, it.total) { s -> s.id }
             }
         } catch (e: Exception) {
             if (startIndex == 0) {
                 diskCacheRead<List<PodcastEpisode>>("songs_page0.json")
-                    ?.let { SongsPage(it, it.size) } ?: throw e
+                    ?.let { SongsPage(it, maxOf(it.size, cachedSongsTotal())) } ?: throw e
             } else {
                 throw e
             }
@@ -806,6 +799,30 @@ class AbsRepository(
 
     private inline fun <reified T> diskCacheWrite(name: String, value: T) {
         runCatching { cacheDir?.resolve(name)?.writeText(json.encodeToString(value)) }
+    }
+
+    /**
+     * Grows a persistent cache as the user pages through a list: page 0
+     * revalidates the cached prefix (resetting the cache only when the
+     * server actually changed), and later pages append items not cached yet.
+     */
+    private inline fun <reified T> mergePagedCache(
+        listFile: String,
+        totalFile: String,
+        startIndex: Int,
+        page: List<T>,
+        total: Int,
+        key: (T) -> Any,
+    ) {
+        val cached = diskCacheRead<List<T>>(listFile).orEmpty()
+        val merged = if (startIndex == 0) {
+            if (cached.take(page.size) == page) cached else page
+        } else {
+            val known = cached.map(key).toHashSet()
+            cached + page.filter { key(it) !in known }
+        }
+        diskCacheWrite(listFile, merged)
+        diskCacheWrite(totalFile, total)
     }
 
     private inline fun <reified T> diskCacheRead(name: String): T? = runCatching {

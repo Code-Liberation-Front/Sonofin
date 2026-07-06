@@ -105,8 +105,8 @@ fun SongsScreen(
                 runCatching { app.repository.cachedSongsFirstPage() }.getOrDefault(emptyList())
             }
             if (cachedFirst.isNotEmpty()) {
-                // Older builds cached a bigger first page; trim to one page.
-                songs = cachedFirst.take(SONGS_PAGE_SIZE)
+                // The cache grows as the user scrolls; paint everything cached.
+                songs = cachedFirst
                 // The persisted total keeps pagination working on cache-only visits.
                 total = maxOf(
                     songs.size,
@@ -150,45 +150,67 @@ fun SongsScreen(
         }
     }
 
-    RefreshablePage(
-        refreshing = refreshing && !initialLoading,
-        onRefresh = { refreshKey++ },
-    ) {
-        when {
-            initialLoading -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
+    // The header stays put while the list scrolls, like the Albums page.
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
-
-            error != null && songs.isEmpty() -> {
-                Column(
-                    Modifier.fillMaxSize().padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+        }
+        Text(
+            "Songs",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        if (total > 0) {
+            Text(
+                if (songs.size < total) "${songs.size} of $total songs" else "${songs.size} songs",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        RefreshablePage(
+            refreshing = refreshing && !initialLoading,
+            onRefresh = { refreshKey++ },
+        ) {
+            when {
+                initialLoading -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
-            }
 
-            else -> {
-                val subtitle = if (songs.size < total) {
-                    "${songs.size} of $total songs"
-                } else {
-                    "${songs.size} songs"
+                error != null && songs.isEmpty() -> {
+                    Column(
+                        Modifier.fillMaxSize().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    }
                 }
-                SongListView(
-                    app = app,
-                    controller = controller,
-                    playerState = playerState,
-                    title = "Songs",
-                    subtitle = subtitle,
-                    songs = songs,
-                    onBack = onBack,
-                    onOpenAlbum = onOpenAlbum,
-                    listState = listState,
-                    loadingMore = loadingMore,
-                )
+
+                else -> {
+                    SongListView(
+                        app = app,
+                        controller = controller,
+                        playerState = playerState,
+                        title = "Songs",
+                        subtitle = "",
+                        songs = songs,
+                        onBack = onBack,
+                        onOpenAlbum = onOpenAlbum,
+                        listState = listState,
+                        loadingMore = loadingMore,
+                        showHeader = false,
+                    )
+                }
             }
         }
     }
@@ -263,6 +285,8 @@ private fun SongListView(
     onOpenAlbum: (String) -> Unit,
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     loadingMore: Boolean = false,
+    /** False when the caller renders its own fixed header above the list. */
+    showHeader: Boolean = true,
 ) {
     val scope = rememberCoroutineScope()
     val completedDownloads by app.downloads.completed.collectAsState()
@@ -277,18 +301,20 @@ private fun SongListView(
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
         item {
             Column(Modifier.padding(horizontal = 16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                if (showHeader) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
-                }
-                Text(title, style = MaterialTheme.typography.headlineMedium)
-                if (subtitle.isNotBlank()) {
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text(title, style = MaterialTheme.typography.headlineMedium)
+                    if (subtitle.isNotBlank()) {
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 PlayShuffleButtons(
                     enabled = songs.isNotEmpty(),

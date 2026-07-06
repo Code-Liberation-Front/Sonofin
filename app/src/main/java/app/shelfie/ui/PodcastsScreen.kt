@@ -94,7 +94,7 @@ fun PodcastsScreen(
                 runCatching { app.repository.cachedAlbumsFirstPage() }.getOrDefault(emptyList())
             }
             if (cached.isNotEmpty()) {
-                albums = cached.take(ALBUMS_PAGE_SIZE)
+                albums = cached
                 total = maxOf(
                     albums.size,
                     withContext(Dispatchers.IO) {

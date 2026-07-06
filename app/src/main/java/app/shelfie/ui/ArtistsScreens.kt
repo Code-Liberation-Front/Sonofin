@@ -98,7 +98,7 @@ fun ArtistsScreen(
                 runCatching { app.repository.cachedArtistsFirstPage() }.getOrDefault(emptyList())
             }
             if (cached.isNotEmpty()) {
-                artists = cached.take(ARTISTS_PAGE_SIZE)
+                artists = cached
                 total = maxOf(
                     artists.size,
                     withContext(Dispatchers.IO) {
@@ -139,10 +139,35 @@ fun ArtistsScreen(
         }
     }
 
-    RefreshablePage(
-        refreshing = refreshing && !initialLoading,
-        onRefresh = { refreshKey++ },
-    ) {
+    // The header stays put while the list scrolls, like the Albums page.
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+        }
+        Text(
+            "Artists",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        if (total > 0) {
+            Text(
+                if (artists.size < total) "${artists.size} of $total artists" else "${artists.size} artists",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
+        RefreshablePage(
+            refreshing = refreshing && !initialLoading,
+            onRefresh = { refreshKey++ },
+        ) {
         when {
             initialLoading -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -158,23 +183,6 @@ fun ArtistsScreen(
 
             else -> {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                    item {
-                        Column(Modifier.padding(horizontal = 16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(onClick = onBack) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                                }
-                            }
-                            Text("Artists", style = MaterialTheme.typography.headlineMedium)
-                            if (total > 0) {
-                                Text(
-                                    if (artists.size < total) "${artists.size} of $total artists" else "${artists.size} artists",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
                     items(artists, key = { it.id }) { artist ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -225,6 +233,7 @@ fun ArtistsScreen(
                     }
                 }
             }
+        }
         }
     }
 }

@@ -307,11 +307,24 @@ final class JellyfinClient: ObservableObject {
         let decoded = try JSONDecoder().decode(JFItems.self, from: data)
         let albums = decoded.Items.map(toAlbum)
         let total = decoded.TotalRecordCount ?? albums.count
-        if startIndex == 0 {
-            cacheWrite("albums_page0.json", albums)
-            cacheWrite("albums_total.json", total)
-        }
+        mergePagedCache("albums_page0.json", totalFile: "albums_total.json", startIndex: startIndex, page: albums, total: total)
         return (albums, total)
+    }
+
+    /// Grows a persistent cache as the user pages through a list: page 0
+    /// revalidates the cached prefix (resetting the cache only when the
+    /// server actually changed), and later pages append items not cached yet.
+    private func mergePagedCache<T: Codable & Identifiable & Equatable>(_ listFile: String, totalFile: String, startIndex: Int, page: [T], total: Int) {
+        let cached: [T] = cacheRead(listFile) ?? []
+        let merged: [T]
+        if startIndex == 0 {
+            merged = Array(cached.prefix(page.count)) == page ? cached : page
+        } else {
+            let known = Set(cached.map(\.id))
+            merged = cached + page.filter { !known.contains($0.id) }
+        }
+        cacheWrite(listFile, merged)
+        cacheWrite(totalFile, total)
     }
 
     /// One page of album artists, A-Z, optionally filtered server-side.
@@ -330,9 +343,8 @@ final class JellyfinClient: ObservableObject {
         let decoded = try JSONDecoder().decode(JFItems.self, from: data)
         let artists = decoded.Items.map { ArtistEntry(id: $0.Id, name: $0.Name ?? "Artist") }
         let total = decoded.TotalRecordCount ?? artists.count
-        if startIndex == 0 && (searchTerm ?? "").isEmpty {
-            cacheWrite("artists_page0.json", artists)
-            cacheWrite("artists_total.json", total)
+        if (searchTerm ?? "").isEmpty {
+            mergePagedCache("artists_page0.json", totalFile: "artists_total.json", startIndex: startIndex, page: artists, total: total)
         }
         return (artists, total)
     }
@@ -421,11 +433,9 @@ final class JellyfinClient: ObservableObject {
         let data = try await get("Items", query: q)
         let decoded = try JSONDecoder().decode(JFItems.self, from: data)
         let songs = decoded.Items.map(toSong)
-        if startIndex == 0 {
-            cacheWrite("songs_page0.json", songs)
-            cacheWrite("songs_total.json", decoded.TotalRecordCount ?? songs.count)
-        }
-        return (songs, decoded.TotalRecordCount ?? songs.count)
+        let total = decoded.TotalRecordCount ?? songs.count
+        mergePagedCache("songs_page0.json", totalFile: "songs_total.json", startIndex: startIndex, page: songs, total: total)
+        return (songs, total)
     }
 
     /// A bounded random sample, for mixes and autoplay continuation.
