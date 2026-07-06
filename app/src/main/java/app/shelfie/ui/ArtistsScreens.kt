@@ -28,13 +28,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -98,9 +98,9 @@ fun ArtistsScreen(
                 runCatching { app.repository.cachedArtistsFirstPage() }.getOrDefault(emptyList())
             }
             if (cached.isNotEmpty()) {
-                artists = cached
+                artists = cached.take(ARTISTS_PAGE_SIZE)
                 total = maxOf(
-                    cached.size,
+                    artists.size,
                     withContext(Dispatchers.IO) {
                         runCatching { app.repository.cachedArtistsTotal() }.getOrDefault(0)
                     },
@@ -118,18 +118,24 @@ fun ArtistsScreen(
         initialLoading = false
     }
 
+    // Pagination lives in one long-lived collector: keying a LaunchedEffect on
+    // scroll state cancels an in-flight page load mid-request (leaving the
+    // spinner stuck), because adding the spinner row itself changes the keys.
     val listState = rememberLazyListState()
-    val nearEnd by remember {
-        derivedStateOf {
-            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            lastVisible >= listState.layoutInfo.totalItemsCount - 8
-        }
-    }
-    LaunchedEffect(nearEnd, artists.size) {
-        if (nearEnd && !initialLoading && !loadingMore && artists.isNotEmpty() && artists.size < total) {
-            loadingMore = true
-            loadPage(artists.size)
-            loadingMore = false
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            (info.visibleItemsInfo.lastOrNull()?.index ?: 0) to info.totalItemsCount
+        }.collect { (lastVisible, count) ->
+            val nearEnd = lastVisible >= count - 8
+            if (nearEnd && !initialLoading && !loadingMore && artists.isNotEmpty() && artists.size < total) {
+                loadingMore = true
+                try {
+                    loadPage(artists.size)
+                } finally {
+                    loadingMore = false
+                }
+            }
         }
     }
 
