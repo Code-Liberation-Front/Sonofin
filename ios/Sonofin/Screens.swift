@@ -701,8 +701,26 @@ struct ArtistsView: View {
     @EnvironmentObject private var router: Router
 
     @State private var artists: [ArtistEntry] = []
+    @State private var artistsError: String?
 
     var body: some View {
+        Group {
+            if artists.isEmpty, let artistsError {
+                Text(artistsError)
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+                    .padding(24)
+            } else if artists.isEmpty {
+                ProgressView()
+            } else {
+                artistsList
+            }
+        }
+        .navigationTitle("Artists")
+        .task { await loadArtists() }
+    }
+
+    private var artistsList: some View {
         List(artists) { artist in
             NavigationLink(value: Route.artist(artist.name)) {
                 HStack(spacing: 12) {
@@ -716,18 +734,29 @@ struct ArtistsView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle("Artists")
         .refreshable {
-            let albums = (try? await client.albums()) ?? []
-            if !albums.isEmpty { artists = artistsFromAlbums(albums) }
-        }
-        .task {
-            if artists.isEmpty {
-                artists = artistsFromAlbums(client.cacheRead("albums.json") ?? [])
+            do {
+                let albums = try await client.albums()
+                if !albums.isEmpty { artists = artistsFromAlbums(albums) }
+            } catch {
+                if artists.isEmpty { artistsError = error.localizedDescription }
             }
-            if !artists.isEmpty && !SessionRefresh.claim("artists") { return }
-            let albums = (try? await client.albums()) ?? []
-            if !albums.isEmpty { artists = artistsFromAlbums(albums) }
+        }
+    }
+
+    private func loadArtists() async {
+        if artists.isEmpty {
+            artists = artistsFromAlbums(client.cacheRead("albums.json") ?? [])
+        }
+        if !artists.isEmpty && !SessionRefresh.claim("artists") { return }
+        do {
+            let albums = try await client.albums()
+            if !albums.isEmpty {
+                artists = artistsFromAlbums(albums)
+                artistsError = nil
+            }
+        } catch {
+            if artists.isEmpty { artistsError = error.localizedDescription }
         }
     }
 }
@@ -738,13 +767,21 @@ struct ArtistDetailView: View {
 
     let artistName: String
     @State private var albums: [Album] = []
+    @State private var loading = true
+    @State private var loadError: String?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
         ScrollView {
-            if albums.isEmpty {
+            if albums.isEmpty && loading {
                 ProgressView().padding(48)
+            }
+            if let loadError, albums.isEmpty {
+                Text(loadError)
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+                    .padding(24)
             }
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(albums) { album in
@@ -759,15 +796,32 @@ struct ArtistDetailView: View {
         .navigationTitle(artistName)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            var all: [Album] = client.cacheRead("albums.json") ?? []
-            if all.isEmpty {
-                all = (try? await client.albums()) ?? []
+            // Cached albums first, then a small artist-scoped server query,
+            // then the full album list as a last resort.
+            let cached: [Album] = client.cacheRead("albums.json") ?? []
+            let fromCache = cached.filter { matchesArtist($0) }
+            if !fromCache.isEmpty {
+                albums = fromCache
             }
-            albums = all.filter {
-                let name = $0.artist.trimmingCharacters(in: .whitespaces)
-                return (name.isEmpty ? "Unknown Artist" : name) == artistName
+            do {
+                let fetched = try await client.albumsForArtist(artistName)
+                if !fetched.isEmpty {
+                    albums = fetched
+                    loadError = nil
+                } else if albums.isEmpty {
+                    let all = (try? await client.albums()) ?? []
+                    albums = all.filter { matchesArtist($0) }
+                }
+            } catch {
+                if albums.isEmpty { loadError = error.localizedDescription }
             }
+            loading = false
         }
+    }
+
+    private func matchesArtist(_ album: Album) -> Bool {
+        let name = album.artist.trimmingCharacters(in: .whitespaces)
+        return (name.isEmpty ? "Unknown Artist" : name) == artistName
     }
 }
 

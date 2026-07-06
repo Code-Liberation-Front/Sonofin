@@ -410,6 +410,23 @@ final class JellyfinClient: ObservableObject {
         ]).map(toSong)
     }
 
+    /// Albums for one artist via a small search-scoped query (avoids fetching
+    /// the whole album library), filtered to exact artist matches.
+    func albumsForArtist(_ name: String) async throws -> [Album] {
+        let matches = try await items([
+            "IncludeItemTypes": "MusicAlbum",
+            "Recursive": "true",
+            "SearchTerm": name,
+            "Limit": "60",
+            "Fields": "DateCreated,ChildCount",
+        ]).map(toAlbum)
+        let wanted = name.trimmingCharacters(in: .whitespaces)
+        return matches.filter {
+            let artist = $0.artist.trimmingCharacters(in: .whitespaces)
+            return (artist.isEmpty ? "Unknown Artist" : artist) == wanted
+        }
+    }
+
     func search(_ term: String) async throws -> (albums: [Album], songs: [Song]) {
         let albumItems = (try? await items([
             "IncludeItemTypes": "MusicAlbum",

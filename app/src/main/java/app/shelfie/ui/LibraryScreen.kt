@@ -144,8 +144,25 @@ fun LibraryScreen(
         item { LibraryNavRow("Albums", { Icon(Icons.Filled.Album, null, tint = MaterialTheme.colorScheme.primary) }, onOpenAlbums) }
         item { LibraryNavRow("Songs", { Icon(Icons.Filled.MusicNote, null, tint = MaterialTheme.colorScheme.primary) }, onOpenSongs) }
 
-        if (recentlyAdded.isNotEmpty()) {
-            item { LibrarySectionTitle("Recently Added") }
+        item { LibrarySectionTitle("Recently Added") }
+        if (recentlyAdded.isEmpty()) {
+            item {
+                Text(
+                    when {
+                        recentState.error != null -> "Couldn't load recently added: ${recentState.error}"
+                        recentState.refreshing -> "Loading…"
+                        else -> "No albums in this library yet."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (recentState.error != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        } else {
             items(recentlyAdded.chunked(2), key = { it.first().id }) { pair ->
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
