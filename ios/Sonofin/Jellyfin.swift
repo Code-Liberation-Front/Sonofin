@@ -34,11 +34,9 @@ struct Mix: Codable, Identifiable, Hashable {
     var songs: [Song]
 }
 
-struct ArtistEntry: Identifiable, Hashable {
-    var id: String { name }
+struct ArtistEntry: Codable, Identifiable, Hashable {
+    let id: String
     var name: String
-    var albumCount: Int
-    var coverAlbumId: String
 }
 
 // MARK: - Jellyfin wire types
@@ -291,19 +289,52 @@ final class JellyfinClient: ObservableObject {
         return try JSONDecoder().decode(JFItems.self, from: data).Items
     }
 
-    /// All albums, name order.
-    func albums() async throws -> [Album] {
+    /// One page of the album library, A-Z. Full-library fetches time out on
+    /// large servers, so screens page 26 at a time.
+    func albumsPage(startIndex: Int, limit: Int = 26) async throws -> (albums: [Album], total: Int) {
         let library = try await resolveLibraryId()
-        let result = try await items([
+        let data = try await get("Items", query: [
+            "UserId": userId,
             "ParentId": library,
             "IncludeItemTypes": "MusicAlbum",
             "Recursive": "true",
             "SortBy": "SortName",
             "SortOrder": "Ascending",
+            "StartIndex": String(startIndex),
+            "Limit": String(limit),
             "Fields": "DateCreated,ChildCount",
-        ]).map(toAlbum)
-        cacheWrite("albums.json", result)
-        return result
+        ])
+        let decoded = try JSONDecoder().decode(JFItems.self, from: data)
+        let albums = decoded.Items.map(toAlbum)
+        let total = decoded.TotalRecordCount ?? albums.count
+        if startIndex == 0 {
+            cacheWrite("albums_page0.json", albums)
+            cacheWrite("albums_total.json", total)
+        }
+        return (albums, total)
+    }
+
+    /// One page of album artists, A-Z, optionally filtered server-side.
+    func artistsPage(startIndex: Int, limit: Int = 26, searchTerm: String? = nil) async throws -> (artists: [ArtistEntry], total: Int) {
+        let library = try await resolveLibraryId()
+        var q = [
+            "UserId": userId,
+            "ParentId": library,
+            "SortBy": "SortName",
+            "SortOrder": "Ascending",
+            "StartIndex": String(startIndex),
+            "Limit": String(limit),
+        ]
+        if let searchTerm, !searchTerm.isEmpty { q["SearchTerm"] = searchTerm }
+        let data = try await get("Artists/AlbumArtists", query: q)
+        let decoded = try JSONDecoder().decode(JFItems.self, from: data)
+        let artists = decoded.Items.map { ArtistEntry(id: $0.Id, name: $0.Name ?? "Artist") }
+        let total = decoded.TotalRecordCount ?? artists.count
+        if startIndex == 0 && (searchTerm ?? "").isEmpty {
+            cacheWrite("artists_page0.json", artists)
+            cacheWrite("artists_total.json", total)
+        }
+        return (artists, total)
     }
 
     /// Newest albums via a dedicated small query.
@@ -336,7 +367,7 @@ final class JellyfinClient: ObservableObject {
         ]).map(toAlbum)) ?? []
         if result.isEmpty {
             var generator = SeededGenerator(seed: UInt64(Self.daySeed()))
-            result = Array(((try? await albums()) ?? []).shuffled(using: &generator).prefix(limit))
+            result = Array(((try? await recentlyAdded(limit: 26)) ?? []).shuffled(using: &generator).prefix(limit))
         }
         cacheWrite("toppicks.json", result)
         return result
@@ -373,7 +404,7 @@ final class JellyfinClient: ObservableObject {
     }
 
     /// One page of the library's songs, A-Z.
-    func songsPage(startIndex: Int, limit: Int = 50) async throws -> (songs: [Song], total: Int) {
+    func songsPage(startIndex: Int, limit: Int = 26) async throws -> (songs: [Song], total: Int) {
         let library = try await resolveLibraryId()
         var q = [
             "UserId": userId,
@@ -410,21 +441,30 @@ final class JellyfinClient: ObservableObject {
         ]).map(toSong)
     }
 
-    /// Albums for one artist via a small search-scoped query (avoids fetching
-    /// the whole album library), filtered to exact artist matches.
-    func albumsForArtist(_ name: String) async throws -> [Album] {
-        let matches = try await items([
+    /// One artist's albums via the server's name-based Artists filter.
+    func artistAlbums(_ name: String) async throws -> [Album] {
+        let result = try await items([
             "IncludeItemTypes": "MusicAlbum",
             "Recursive": "true",
-            "SearchTerm": name,
-            "Limit": "60",
+            "Artists": name,
+            "Limit": "100",
+            "SortBy": "SortName",
+            "SortOrder": "Ascending",
             "Fields": "DateCreated,ChildCount",
         ]).map(toAlbum)
-        let wanted = name.trimmingCharacters(in: .whitespaces)
-        return matches.filter {
-            let artist = $0.artist.trimmingCharacters(in: .whitespaces)
-            return (artist.isEmpty ? "Unknown Artist" : artist) == wanted
+        cacheWrite(Self.artistCacheName(name), result)
+        return result
+    }
+
+    /// Stable cache file name for an artist (String.hashValue is randomized
+    /// per launch, so it can't be used for disk cache keys).
+    static func artistCacheName(_ name: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in Array(name.utf8) {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
         }
+        return "artist_\(String(hash, radix: 36)).json"
     }
 
     func search(_ term: String) async throws -> (albums: [Album], songs: [Song]) {
@@ -575,17 +615,6 @@ struct SeededGenerator: RandomNumberGenerator {
         z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
         return z ^ (z >> 31)
     }
-}
-
-/// Groups albums by artist, like the Android artistsFromAlbums.
-func artistsFromAlbums(_ albums: [Album]) -> [ArtistEntry] {
-    let grouped = Dictionary(grouping: albums) { album -> String in
-        let name = album.artist.trimmingCharacters(in: .whitespaces)
-        return name.isEmpty ? "Unknown Artist" : name
-    }
-    return grouped
-        .map { ArtistEntry(name: $0.key, albumCount: $0.value.count, coverAlbumId: $0.value[0].id) }
-        .sorted { $0.name.lowercased() < $1.name.lowercased() }
 }
 
 /// Album order: disc, then track, then title.

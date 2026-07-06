@@ -48,7 +48,7 @@ import app.shelfie.playlist.PlaylistEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private const val SONGS_PAGE_SIZE = 50
+private const val SONGS_PAGE_SIZE = 26
 
 /**
  * Apple Music-style "Songs" page. Large libraries can't be fetched in one

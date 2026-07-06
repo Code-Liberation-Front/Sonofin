@@ -27,7 +27,6 @@ import app.shelfie.data.LibraryItemSummary
 import app.shelfie.data.PodcastEpisode
 import app.shelfie.pin.PinnedItem
 import app.shelfie.ui.MainActivity
-import app.shelfie.ui.artistsFromAlbums
 import app.shelfie.ui.sortedByAlbumOrder
 import com.google.android.gms.cast.framework.CastContext
 import com.google.common.collect.ImmutableList
@@ -429,24 +428,18 @@ class PlaybackService : MediaLibraryService() {
                             parentId == PLAYLISTS_ID -> playlistFolders()
 
                             parentId == ARTISTS_ID ->
-                                artistsFromAlbums(repo.podcasts()).map { artist ->
+                                repo.artistsPage(0, 100).artists.map { artist ->
                                     folderItem(
                                         id = "$ARTIST_PREFIX${artist.name}",
                                         title = artist.name,
-                                        subtitle = if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums",
                                         extras = Bundle().apply { putInt(EXTRA_STYLE_BROWSABLE, STYLE_GRID) },
-                                        artworkUri = Uri.parse(repo.coverUrl(artist.coverAlbumId)),
+                                        artworkUri = Uri.parse(repo.coverUrl(artist.id)),
                                     )
                                 }
 
                             parentId.startsWith(ARTIST_PREFIX) -> {
                                 val name = parentId.removePrefix(ARTIST_PREFIX)
-                                repo.podcasts()
-                                    .filter {
-                                        it.media.metadata.displayAuthor?.trim().orEmpty()
-                                            .ifBlank { "Unknown Artist" } == name
-                                    }
-                                    .map { it.toBrowsableItem() }
+                                repo.artistAlbums(name).map { it.toBrowsableItem() }
                             }
 
                             parentId == TOPPICKS_ID ->
@@ -503,7 +496,7 @@ class PlaybackService : MediaLibraryService() {
                                         ),
                                     )
                                 }
-                                shelf + repo.podcasts().map { it.toBrowsableItem() }
+                                shelf + repo.albumsPage(0, 100).albums.map { it.toBrowsableItem() }
                             }
 
                             parentId.startsWith(PODCAST_PREFIX) -> {

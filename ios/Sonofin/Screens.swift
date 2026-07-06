@@ -484,18 +484,16 @@ struct LibraryView: View {
     /// opens, so Albums/Artists/Songs paint instantly (once per session).
     private func warmSubPages() async {
         guard SessionRefresh.claim("libraryWarm") else { return }
-        async let albumsResult = client.albums()
+        async let albumsResult = client.albumsPage(startIndex: 0)
+        async let artistsResult = client.artistsPage(startIndex: 0)
         async let songsResult = client.songsPage(startIndex: 0)
         let albumsOk = (try? await albumsResult) != nil
+        let artistsOk = (try? await artistsResult) != nil
         let songsOk = (try? await songsResult) != nil
         // Mark the sub-pages fresh so they serve the warmed caches directly.
-        if albumsOk {
-            _ = SessionRefresh.claim("albums")
-            _ = SessionRefresh.claim("artists")
-        }
-        if songsOk {
-            _ = SessionRefresh.claim("songs")
-        }
+        if albumsOk { _ = SessionRefresh.claim("albums") }
+        if artistsOk { _ = SessionRefresh.claim("artists") }
+        if songsOk { _ = SessionRefresh.claim("songs") }
     }
 
     private func libraryLink(_ title: String, icon: String, route: Route) -> some View {
@@ -582,31 +580,79 @@ struct AlbumsView: View {
     @EnvironmentObject private var router: Router
 
     @State private var albums: [Album] = []
+    @State private var total = 0
+    @State private var loadingMore = false
+    @State private var loadError: String?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
         ScrollView {
+            if albums.isEmpty, let loadError {
+                Text(loadError)
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+                    .padding(24)
+            }
+            if total > 0 {
+                Text(albums.count < total ? "\(albums.count) of \(total) albums" : "\(albums.count) albums")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+            }
             LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(albums) { album in
+                ForEach(Array(albums.enumerated()), id: \.element.id) { index, album in
                     NavigationLink(value: Route.album(album.id)) {
                         AlbumCard(album: album)
                     }
                     .buttonStyle(.plain)
+                    .onAppear {
+                        if index >= albums.count - 6 { loadMore() }
+                    }
                 }
             }
             .padding()
+            if loadingMore {
+                ProgressView().padding(.bottom, 16)
+            }
         }
         .navigationTitle("Albums")
-        .refreshable {
-            albums = (try? await client.albums()) ?? albums
-        }
+        .refreshable { await loadFirstPage() }
         .task {
             if albums.isEmpty {
-                albums = client.cacheRead("albums.json") ?? []
+                albums = client.cacheRead("albums_page0.json") ?? []
+                total = max(albums.count, client.cacheRead("albums_total.json") ?? 0)
             }
             if !albums.isEmpty && !SessionRefresh.claim("albums") { return }
-            albums = (try? await client.albums()) ?? albums
+            await loadFirstPage()
+        }
+    }
+
+    private func loadFirstPage() async {
+        do {
+            let page = try await client.albumsPage(startIndex: 0)
+            if albums.isEmpty || Array(albums.prefix(page.albums.count)) != page.albums {
+                albums = page.albums
+            }
+            total = page.total
+            loadError = nil
+        } catch {
+            if albums.isEmpty { loadError = error.localizedDescription }
+        }
+    }
+
+    private func loadMore() {
+        guard !loadingMore, !albums.isEmpty, albums.count < total else { return }
+        loadingMore = true
+        let client = client
+        let start = albums.count
+        Task {
+            defer { loadingMore = false }
+            guard let page = try? await client.albumsPage(startIndex: start) else { return }
+            let known = Set(albums.map(\.id))
+            albums.append(contentsOf: page.albums.filter { !known.contains($0.id) })
+            total = page.total
         }
     }
 }
@@ -701,6 +747,8 @@ struct ArtistsView: View {
     @EnvironmentObject private var router: Router
 
     @State private var artists: [ArtistEntry] = []
+    @State private var total = 0
+    @State private var loadingMore = false
     @State private var artistsError: String?
 
     var body: some View {
@@ -717,46 +765,71 @@ struct ArtistsView: View {
             }
         }
         .navigationTitle("Artists")
-        .task { await loadArtists() }
+        .task {
+            if artists.isEmpty {
+                artists = client.cacheRead("artists_page0.json") ?? []
+                total = max(artists.count, client.cacheRead("artists_total.json") ?? 0)
+            }
+            if !artists.isEmpty && !SessionRefresh.claim("artists") { return }
+            await loadFirstPage()
+        }
     }
 
     private var artistsList: some View {
-        List(artists) { artist in
-            NavigationLink(value: Route.artist(artist.name)) {
-                HStack(spacing: 12) {
-                    CoverArt(url: client.imageURL(albumId: artist.coverAlbumId), size: 48, corner: 24)
-                    VStack(alignment: .leading, spacing: 2) {
+        List {
+            if total > 0 {
+                Text(artists.count < total ? "\(artists.count) of \(total) artists" : "\(artists.count) artists")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .listRowSeparator(.hidden)
+            }
+            ForEach(Array(artists.enumerated()), id: \.element.id) { index, artist in
+                NavigationLink(value: Route.artist(artist.name)) {
+                    HStack(spacing: 12) {
+                        CoverArt(url: client.imageURL(albumId: artist.id), size: 48, corner: 24)
                         Text(artist.name).font(.subheadline).bold().foregroundColor(.primary)
-                        Text(artist.albumCount == 1 ? "1 album" : "\(artist.albumCount) albums")
-                            .font(.caption).foregroundColor(.secondary)
                     }
+                }
+                .onAppear {
+                    if index >= artists.count - 8 { loadMore() }
+                }
+            }
+            if loadingMore {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
                 }
             }
         }
         .listStyle(.plain)
-        .refreshable {
-            do {
-                let albums = try await client.albums()
-                if !albums.isEmpty { artists = artistsFromAlbums(albums) }
-            } catch {
-                if artists.isEmpty { artistsError = error.localizedDescription }
+        .refreshable { await loadFirstPage() }
+    }
+
+    private func loadFirstPage() async {
+        do {
+            let page = try await client.artistsPage(startIndex: 0)
+            if artists.isEmpty || Array(artists.prefix(page.artists.count)) != page.artists {
+                artists = page.artists
             }
+            total = page.total
+            artistsError = nil
+        } catch {
+            if artists.isEmpty { artistsError = error.localizedDescription }
         }
     }
 
-    private func loadArtists() async {
-        if artists.isEmpty {
-            artists = artistsFromAlbums(client.cacheRead("albums.json") ?? [])
-        }
-        if !artists.isEmpty && !SessionRefresh.claim("artists") { return }
-        do {
-            let albums = try await client.albums()
-            if !albums.isEmpty {
-                artists = artistsFromAlbums(albums)
-                artistsError = nil
-            }
-        } catch {
-            if artists.isEmpty { artistsError = error.localizedDescription }
+    private func loadMore() {
+        guard !loadingMore, !artists.isEmpty, artists.count < total else { return }
+        loadingMore = true
+        let client = client
+        let start = artists.count
+        Task {
+            defer { loadingMore = false }
+            guard let page = try? await client.artistsPage(startIndex: start) else { return }
+            let known = Set(artists.map(\.id))
+            artists.append(contentsOf: page.artists.filter { !known.contains($0.id) })
+            total = page.total
         }
     }
 }
@@ -796,32 +869,19 @@ struct ArtistDetailView: View {
         .navigationTitle(artistName)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            // Cached albums first, then a small artist-scoped server query,
-            // then the full album list as a last resort.
-            let cached: [Album] = client.cacheRead("albums.json") ?? []
-            let fromCache = cached.filter { matchesArtist($0) }
-            if !fromCache.isEmpty {
-                albums = fromCache
+            // Cached copy first, then the server's artist-scoped query.
+            if albums.isEmpty {
+                albums = client.cacheRead(JellyfinClient.artistCacheName(artistName)) ?? []
             }
             do {
-                let fetched = try await client.albumsForArtist(artistName)
-                if !fetched.isEmpty {
-                    albums = fetched
-                    loadError = nil
-                } else if albums.isEmpty {
-                    let all = (try? await client.albums()) ?? []
-                    albums = all.filter { matchesArtist($0) }
-                }
+                let fetched = try await client.artistAlbums(artistName)
+                if albums.isEmpty || fetched != albums { albums = fetched }
+                loadError = nil
             } catch {
                 if albums.isEmpty { loadError = error.localizedDescription }
             }
             loading = false
         }
-    }
-
-    private func matchesArtist(_ album: Album) -> Bool {
-        let name = album.artist.trimmingCharacters(in: .whitespaces)
-        return (name.isEmpty ? "Unknown Artist" : name) == artistName
     }
 }
 
@@ -938,7 +998,9 @@ struct PlaylistsView: View {
                             name: playlist.name,
                             subtitle: "\(playlist.entries.count) songs",
                             coverAlbumId: playlist.entries.first?.albumId,
-                            icon: "music.note"
+                            icon: "music.note",
+                            isDownloaded: !playlist.entries.isEmpty
+                                && playlist.entries.allSatisfy { downloads.isDownloaded(songId: $0.songId) }
                         )
                     }
                     .buttonStyle(.plain)
@@ -968,7 +1030,7 @@ struct PlaylistsView: View {
     }
 
     @ViewBuilder
-    private func playlistCard(name: String, subtitle: String, coverAlbumId: String?, icon: String) -> some View {
+    private func playlistCard(name: String, subtitle: String, coverAlbumId: String?, icon: String, isDownloaded: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if let coverAlbumId, !coverAlbumId.isEmpty {
                 CoverArtFlexible(url: client.imageURL(albumId: coverAlbumId))
@@ -978,7 +1040,14 @@ struct PlaylistsView: View {
                     .overlay(Image(systemName: icon).font(.system(size: 44)).foregroundColor(.accentColor))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            Text(name).font(.subheadline).bold().lineLimit(1)
+            HStack(spacing: 3) {
+                if isDownloaded {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(.accentColor)
+                }
+                Text(name).font(.subheadline).bold().lineLimit(1)
+            }
             Text(subtitle).font(.caption).foregroundColor(.secondary).lineLimit(1)
         }
     }
@@ -1218,10 +1287,10 @@ struct SearchView: View {
                         ForEach(artists) { artist in
                             NavigationLink(value: Route.artist(artist.name)) {
                                 HStack(spacing: 12) {
-                                    CoverArt(url: client.imageURL(albumId: artist.coverAlbumId), size: 44, corner: 22)
+                                    CoverArt(url: client.imageURL(albumId: artist.id), size: 44, corner: 22)
                                     VStack(alignment: .leading) {
                                         Text(artist.name).font(.subheadline).bold().foregroundColor(.primary)
-                                        Text("Artist • \(artist.albumCount) albums")
+                                        Text("Artist")
                                             .font(.caption).foregroundColor(.secondary)
                                     }
                                 }
@@ -1289,9 +1358,7 @@ struct SearchView: View {
         let client = client
         Task {
             let result = (try? await client.search(trimmed)) ?? ([], [])
-            let allAlbums: [Album] = client.cacheRead("albums.json") ?? []
-            let artistMatches = artistsFromAlbums(allAlbums)
-                .filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+            let artistMatches = (try? await client.artistsPage(startIndex: 0, limit: 20, searchTerm: trimmed).artists) ?? []
             await MainActor.run {
                 albums = result.0
                 songs = result.1

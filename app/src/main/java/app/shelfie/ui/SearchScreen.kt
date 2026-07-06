@@ -46,7 +46,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 private data class SearchResults(
-    val artists: List<ArtistRow>,
+    val artists: List<app.shelfie.data.AbsRepository.JellyArtist>,
     val podcasts: List<LibraryItemSummary>,
     val episodes: List<Pair<LibraryItemExpanded, PodcastEpisode>>,
 ) {
@@ -89,11 +89,10 @@ fun SearchScreen(
         val outcome = withContext(Dispatchers.IO) {
             runCatching {
                 val (podcasts, episodes) = app.repository.search(query)
-                // Artist matches come from grouping the album library locally.
-                val albums = app.repository.cachedAlbums()
-                    .ifEmpty { runCatching { app.repository.podcasts() }.getOrDefault(emptyList()) }
-                val artists = artistsFromAlbums(albums)
-                    .filter { it.name.contains(query.trim(), ignoreCase = true) }
+                // Artist matches come from the server's paged artist search.
+                val artists = runCatching {
+                    app.repository.artistsPage(0, 20, searchTerm = query.trim()).artists
+                }.getOrDefault(emptyList())
                 SearchResults(artists, podcasts, episodes)
             }
         }
@@ -159,10 +158,10 @@ fun SearchScreen(
                 LazyColumn(Modifier.fillMaxSize()) {
                     if (found.artists.isNotEmpty()) {
                         item { SearchSectionTitle("Artists") }
-                        items(found.artists, key = { "a:${it.name}" }) { artist ->
+                        items(found.artists, key = { "a:${it.id}" }) { artist ->
                             ArtistResultRow(
-                                artist = artist,
-                                coverUrl = app.repository.coverUrl(artist.coverAlbumId),
+                                name = artist.name,
+                                coverUrl = app.repository.coverUrl(artist.id),
                                 onClick = { onOpenArtist(artist.name) },
                             )
                         }
@@ -237,7 +236,7 @@ private fun SearchSectionTitle(text: String) {
 }
 
 @Composable
-private fun ArtistResultRow(artist: ArtistRow, coverUrl: String, onClick: () -> Unit) {
+private fun ArtistResultRow(name: String, coverUrl: String, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -255,13 +254,13 @@ private fun ArtistResultRow(artist: ArtistRow, coverUrl: String, onClick: () -> 
         )
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(
-                artist.name,
+                name,
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (artist.albumCount == 1) "Artist • 1 album" else "Artist • ${artist.albumCount} albums",
+                "Artist",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

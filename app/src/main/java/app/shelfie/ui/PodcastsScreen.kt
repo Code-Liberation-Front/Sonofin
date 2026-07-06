@@ -1,37 +1,36 @@
 package app.shelfie.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,13 +43,12 @@ import app.shelfie.data.LibraryItemSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-private sealed interface PodcastsUi {
-    data object Loading : PodcastsUi
-    data class Error(val message: String) : PodcastsUi
-    data class Ready(val podcasts: List<LibraryItemSummary>) : PodcastsUi
-}
+private const val ALBUMS_PAGE_SIZE = 26
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The Albums grid, paged 26 at a time: fetching the whole album library in
+ * one request times out on large servers.
+ */
 @Composable
 fun PodcastsScreen(
     app: ShelfieApp,
@@ -58,26 +56,83 @@ fun PodcastsScreen(
     onBack: (() -> Unit)? = null,
     controller: androidx.media3.session.MediaController? = null,
 ) {
+    var albums by remember { mutableStateOf<List<LibraryItemSummary>>(emptyList()) }
+    var total by remember { mutableIntStateOf(0) }
+    var initialLoading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
+    var loadingMore by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
     var refreshKey by remember { mutableIntStateOf(0) }
-    val albums = rememberServerData(
-        refreshKey = refreshKey,
-        sessionKey = "albums",
-        cached = { app.repository.cachedAlbums().ifEmpty { null } },
-        fetch = {
-            if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
-            app.repository.podcasts(forceRefresh = true)
-        },
-    )
-    val ui = when {
-        albums.data != null -> PodcastsUi.Ready(albums.data.orEmpty())
-        albums.error != null -> PodcastsUi.Error(albums.error.orEmpty())
-        else -> PodcastsUi.Loading
+
+    suspend fun loadPage(startIndex: Int) {
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                if (!app.repository.ensureConfigured()) throw IllegalStateException("Not logged in")
+                app.repository.albumsPage(startIndex, ALBUMS_PAGE_SIZE)
+            }
+        }
+        result.fold(
+            onSuccess = { page ->
+                if (startIndex == 0) {
+                    total = page.total
+                    if (albums.take(page.albums.size) != page.albums) albums = page.albums
+                } else {
+                    albums = (albums + page.albums).distinctBy { it.id }
+                    total = page.total
+                }
+                error = null
+            },
+            onFailure = { e ->
+                if (albums.isEmpty()) error = e.message ?: "Failed to load albums"
+            },
+        )
+    }
+
+    LaunchedEffect(refreshKey) {
+        if (albums.isEmpty()) {
+            val cached = withContext(Dispatchers.IO) {
+                runCatching { app.repository.cachedAlbumsFirstPage() }.getOrDefault(emptyList())
+            }
+            if (cached.isNotEmpty()) {
+                albums = cached
+                total = maxOf(
+                    cached.size,
+                    withContext(Dispatchers.IO) {
+                        runCatching { app.repository.cachedAlbumsTotal() }.getOrDefault(0)
+                    },
+                )
+                initialLoading = false
+            }
+        }
+        if (refreshKey == 0 && albums.isNotEmpty() && !claimSessionRefresh("albums")) {
+            initialLoading = false
+            return@LaunchedEffect
+        }
+        refreshing = true
+        loadPage(0)
+        refreshing = false
+        initialLoading = false
+    }
+
+    val gridState = rememberLazyGridState()
+    val nearEnd by remember {
+        derivedStateOf {
+            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            lastVisible >= gridState.layoutInfo.totalItemsCount - 6
+        }
+    }
+    LaunchedEffect(nearEnd, albums.size) {
+        if (nearEnd && !initialLoading && !loadingMore && albums.isNotEmpty() && albums.size < total) {
+            loadingMore = true
+            loadPage(albums.size)
+            loadingMore = false
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
         if (onBack != null) {
             Row(
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
@@ -91,61 +146,71 @@ fun PodcastsScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
+            if (total > 0) {
+                Text(
+                    if (albums.size < total) "${albums.size} of $total albums" else "${albums.size} albums",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
         }
         RefreshablePage(
-            refreshing = albums.refreshing,
+            refreshing = refreshing && !initialLoading,
             onRefresh = { refreshKey++ },
         ) {
-            PodcastsContent(app, controller, onOpenPodcast, ui, onRetry = { refreshKey++ })
-        }
-    }
-}
-
-@Composable
-private fun PodcastsContent(
-    app: ShelfieApp,
-    controller: androidx.media3.session.MediaController?,
-    onOpenPodcast: (String) -> Unit,
-    ui: PodcastsUi,
-    onRetry: () -> Unit,
-) {
-    when (val state = ui) {
-        is PodcastsUi.Loading -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        }
-
-        is PodcastsUi.Error -> {
-            Column(
-                Modifier.fillMaxSize().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(state.message, color = MaterialTheme.colorScheme.error)
-                Button(onClick = onRetry, modifier = Modifier.padding(top = 16.dp)) {
-                    Text("Retry")
+            when {
+                initialLoading -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
-            }
-        }
 
-        is PodcastsUi.Ready -> {
-            val scope = rememberCoroutineScope()
-            val pins by app.pins.pins.collectAsState()
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 140.dp),
-                contentPadding = PaddingValues(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(state.podcasts, key = { it.id }) { podcast ->
-                    PodcastCard(
-                        podcast = podcast,
-                        coverUrl = app.repository.coverUrl(podcast.id),
-                        onClick = { onOpenPodcast(podcast.id) },
-                        actions = albumMenuActions(app, scope, controller, pins, podcast),
-                    )
+                error != null && albums.isEmpty() -> {
+                    Column(
+                        Modifier.fillMaxSize().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+
+                else -> {
+                    val scope = rememberCoroutineScope()
+                    val pins by app.pins.pins.collectAsState()
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(minSize = 140.dp),
+                        contentPadding = PaddingValues(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(albums, key = { it.id }) { podcast ->
+                            PodcastCard(
+                                podcast = podcast,
+                                coverUrl = app.repository.coverUrl(podcast.id),
+                                onClick = { onOpenPodcast(podcast.id) },
+                                actions = albumMenuActions(app, scope, controller, pins, podcast),
+                            )
+                        }
+                        if (loadingMore) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.padding(4.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -161,29 +226,29 @@ private fun PodcastCard(
 ) {
     AlbumLongPressBox(onClick = onClick, actions = actions) {
         Column {
-        CoverImage(
-            model = coverUrl,
-            contentDescription = podcast.media.metadata.title,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(10.dp)),
-        )
-        Text(
-            text = podcast.media.metadata.title ?: "Album",
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        if (podcast.media.numEpisodes > 0) {
-            Text(
-                text = "${podcast.media.numEpisodes} tracks",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            CoverImage(
+                model = coverUrl,
+                contentDescription = podcast.media.metadata.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(10.dp)),
             )
-        }
+            Text(
+                text = podcast.media.metadata.title ?: "Album",
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            if (podcast.media.numEpisodes > 0) {
+                Text(
+                    text = "${podcast.media.numEpisodes} tracks",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

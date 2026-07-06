@@ -396,12 +396,16 @@ fun PlaylistsScreen(
             ),
         )
         playlists.forEach { playlist ->
+            val allDownloaded = playlist.entries.isNotEmpty() && playlist.entries.all { entry ->
+                downloaded.any { it.itemId == entry.itemId && it.episodeId == entry.episodeId }
+            }
             add(
                 PlaylistCardData(
                     id = playlist.id,
                     name = playlist.name,
                     subtitle = "${playlist.entries.size} songs",
                     coverItemId = playlist.entries.firstOrNull()?.itemId,
+                    isDownloaded = allDownloaded,
                 ),
             )
         }
@@ -452,6 +456,8 @@ private data class PlaylistCardData(
     val subtitle: String,
     /** Album id whose cover art fronts the playlist; null shows an icon instead. */
     val coverItemId: String?,
+    /** True when every song in the playlist is downloaded. */
+    val isDownloaded: Boolean = false,
 )
 
 @Composable
@@ -486,13 +492,25 @@ private fun PlaylistCard(
                 )
             }
         }
-        Text(
-            card.name,
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(top = 6.dp),
-        )
+        ) {
+            if (card.isDownloaded) {
+                Icon(
+                    Icons.Filled.DownloadDone,
+                    contentDescription = "Downloaded",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 2.dp).size(16.dp),
+                )
+            }
+            Text(
+                card.name,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         Text(
             card.subtitle,
             style = MaterialTheme.typography.bodySmall,

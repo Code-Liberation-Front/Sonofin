@@ -335,6 +335,104 @@ class AbsRepository(
         return result
     }
 
+    data class AlbumsPage(val albums: List<LibraryItemSummary>, val total: Int)
+
+    /** One page of the album library, A-Z. Full fetches time out on large servers. */
+    suspend fun albumsPage(startIndex: Int, limit: Int = 26): AlbumsPage {
+        return try {
+            val response = requireApi().items(
+                userId = requireUserId(),
+                parentId = activeLibraryId(),
+                includeItemTypes = "MusicAlbum",
+                recursive = true,
+                sortBy = "SortName",
+                sortOrder = "Ascending",
+                startIndex = startIndex,
+                limit = limit,
+            )
+            AlbumsPage(
+                albums = response.items.map { it.toSummary() },
+                total = response.totalRecordCount,
+            ).also {
+                if (startIndex == 0) {
+                    diskCacheWrite("albums_page0.json", it.albums)
+                    diskCacheWrite("albums_total.json", it.total)
+                }
+            }
+        } catch (e: Exception) {
+            if (startIndex == 0) {
+                diskCacheRead<List<LibraryItemSummary>>("albums_page0.json")
+                    ?.let { AlbumsPage(it, cachedAlbumsTotal()) } ?: throw e
+            } else {
+                throw e
+            }
+        }
+    }
+
+    @kotlinx.serialization.Serializable
+    data class JellyArtist(val id: String, val name: String)
+
+    data class ArtistsPage(val artists: List<JellyArtist>, val total: Int)
+
+    /** One page of album artists via Jellyfin's dedicated (indexed) endpoint. */
+    suspend fun artistsPage(startIndex: Int, limit: Int = 26, searchTerm: String? = null): ArtistsPage {
+        return try {
+            val response = requireApi().albumArtists(
+                userId = requireUserId(),
+                parentId = activeLibraryId(),
+                searchTerm = searchTerm?.takeIf { it.isNotBlank() },
+                startIndex = startIndex,
+                limit = limit,
+            )
+            ArtistsPage(
+                artists = response.items.map { JellyArtist(it.id, it.name ?: "Unknown Artist") },
+                total = response.totalRecordCount,
+            ).also {
+                if (startIndex == 0 && searchTerm == null) {
+                    diskCacheWrite("artists_page0.json", it.artists)
+                    diskCacheWrite("artists_total.json", it.total)
+                }
+            }
+        } catch (e: Exception) {
+            if (startIndex == 0 && searchTerm == null) {
+                diskCacheRead<List<JellyArtist>>("artists_page0.json")
+                    ?.let { ArtistsPage(it, diskCacheRead<Int>("artists_total.json") ?: it.size) } ?: throw e
+            } else {
+                throw e
+            }
+        }
+    }
+
+    /** Albums credited to an artist, via a name-scoped query (fast). */
+    suspend fun artistAlbums(artistName: String): List<LibraryItemSummary> {
+        val result = try {
+            requireApi().items(
+                userId = requireUserId(),
+                parentId = activeLibraryId(),
+                includeItemTypes = "MusicAlbum",
+                recursive = true,
+                artists = artistName,
+                sortBy = "SortName",
+                sortOrder = "Ascending",
+                limit = 100,
+            ).items.map { it.toSummary() }
+                .also { diskCacheWrite("artist_${artistName.hashCode()}.json", it) }
+        } catch (e: Exception) {
+            diskCacheRead<List<LibraryItemSummary>>("artist_${artistName.hashCode()}.json") ?: throw e
+        }
+        return result
+    }
+
+    fun cachedAlbumsFirstPage(): List<LibraryItemSummary> =
+        diskCacheRead<List<LibraryItemSummary>>("albums_page0.json").orEmpty()
+
+    fun cachedAlbumsTotal(): Int = diskCacheRead<Int>("albums_total.json") ?: 0
+
+    fun cachedArtistsFirstPage(): List<JellyArtist> =
+        diskCacheRead<List<JellyArtist>>("artists_page0.json").orEmpty()
+
+    fun cachedArtistsTotal(): Int = diskCacheRead<Int>("artists_total.json") ?: 0
+
     data class SongsPage(val songs: List<PodcastEpisode>, val total: Int)
 
     /**
@@ -387,9 +485,10 @@ class AbsRepository(
                 limit = limit,
             ).items.map { it.toSummary() }
         }.getOrDefault(emptyList())
-        // A fresh library has no play history yet; rotate a daily selection instead.
+        // A fresh library has no play history yet; rotate the newest albums
+        // instead (a small query — the full library times out on big servers).
         val result = played.ifEmpty {
-            runCatching { podcasts(forceRefresh) }.getOrDefault(emptyList())
+            runCatching { recentlyAdded(26, forceRefresh) }.getOrDefault(emptyList())
                 .shuffled(kotlin.random.Random(daySeed())).take(limit)
         }
         if (result.isEmpty()) {

@@ -35,10 +35,24 @@ interface AbsApi {
         @Query("SortOrder") sortOrder: String? = null,
         @Query("Filters") filters: String? = null,
         @Query("SearchTerm") searchTerm: String? = null,
+        /** Name-based artist filter (pipe-delimited). */
+        @Query("Artists") artists: String? = null,
         @Query("StartIndex") startIndex: Int? = null,
         @Query("Limit") limit: Int? = null,
         // Only valid ItemFields enum values; AlbumArtist/Artists are returned by default.
         @Query("Fields") fields: String = "DateCreated,Overview,ChildCount,Genres",
+    ): JfItemsResponse
+
+    /** Album artists in a library, paged and searchable server-side. */
+    @GET("Artists/AlbumArtists")
+    suspend fun albumArtists(
+        @Query("UserId") userId: String,
+        @Query("ParentId") parentId: String? = null,
+        @Query("SearchTerm") searchTerm: String? = null,
+        @Query("StartIndex") startIndex: Int? = null,
+        @Query("Limit") limit: Int? = null,
+        @Query("SortBy") sortBy: String = "SortName",
+        @Query("SortOrder") sortOrder: String = "Ascending",
     ): JfItemsResponse
 
     @GET("Users/{userId}/Items/{itemId}")
