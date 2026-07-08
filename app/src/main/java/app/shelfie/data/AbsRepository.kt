@@ -106,14 +106,34 @@ class AbsRepository(
         return true
     }
 
+    /**
+     * Base URLs to try for what the user typed: https first, then plain http
+     * when no scheme was given, since many self-hosted servers have no SSL.
+     */
+    private fun serverCandidates(serverInput: String): List<String> {
+        val bare = serverInput.trim().trimEnd('/')
+        return if (bare.startsWith("http://") || bare.startsWith("https://")) {
+            listOf(bare)
+        } else {
+            listOf("https://$bare", "http://$bare")
+        }
+    }
+
     /** Checks the server is reachable before any credentials exist. */
     suspend fun serverStatus(serverInput: String): ServerStatus {
-        val server = normalizeServerUrl(serverInput)
         deviceId = settings.deviceId()
-        // A successful public-info call proves the URL points at a Jellyfin server.
-        buildApi(server).publicInfo()
-        // Jellyfin authenticates with username/password; advertise local auth only.
-        return ServerStatus(isInit = true, authMethods = listOf("local"))
+        var lastError: Exception? = null
+        for (server in serverCandidates(serverInput)) {
+            try {
+                // A successful public-info call proves the URL points at a Jellyfin server.
+                buildApi(server).publicInfo()
+                // Jellyfin authenticates with username/password; advertise local auth only.
+                return ServerStatus(isInit = true, authMethods = listOf("local"))
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IllegalStateException("Server unreachable")
     }
 
     /**
@@ -126,15 +146,26 @@ class AbsRepository(
     }
 
     suspend fun login(serverInput: String, username: String, password: String) {
-        val server = normalizeServerUrl(serverInput)
         deviceId = settings.deviceId()
-        val anonymous = buildApi(server)
-        val result = anonymous.authenticate(JfAuthRequest(username = username, pw = password))
-        if (result.accessToken.isBlank() || result.user.id.isBlank()) {
-            throw IllegalStateException("Login failed")
+        var lastError: Exception? = null
+        for (server in serverCandidates(serverInput)) {
+            val result = try {
+                buildApi(server).authenticate(JfAuthRequest(username = username, pw = password))
+            } catch (e: retrofit2.HttpException) {
+                // The server answered (e.g. wrong password) — don't retry http.
+                throw e
+            } catch (e: Exception) {
+                lastError = e
+                continue
+            }
+            if (result.accessToken.isBlank() || result.user.id.isBlank()) {
+                throw IllegalStateException("Login failed")
+            }
+            configure(server, result.accessToken, result.user.id)
+            settings.saveLogin(server, result.accessToken, result.user.id, result.user.name.ifBlank { username })
+            return
         }
-        configure(server, result.accessToken, result.user.id)
-        settings.saveLogin(server, result.accessToken, result.user.id, result.user.name.ifBlank { username })
+        throw lastError ?: IllegalStateException("Login failed")
     }
 
     suspend fun logout() {
@@ -840,7 +871,7 @@ class AbsRepository(
             append(", Version=\"$CLIENT_VERSION\"")
             if (token.isNotBlank()) append(", Token=\"$token\"")
         }
-        val client = OkHttpClient.Builder()
+        val client = InsecureTls.apply(OkHttpClient.Builder())
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .header("Authorization", authValue)

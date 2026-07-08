@@ -3,6 +3,27 @@ import Foundation
 import MediaPlayer
 import UIKit
 
+/// Lets AVPlayer stream from servers with self-signed certificates by
+/// accepting the server-trust challenge the media pipeline raises.
+final class InsecureAssetLoader: NSObject, AVAssetResourceLoaderDelegate {
+    static let shared = InsecureAssetLoader()
+    static let queue = DispatchQueue(label: "sonofin.assetloader")
+
+    func resourceLoader(
+        _ resourceLoader: AVAssetResourceLoader,
+        shouldWaitForResponseTo authenticationChallenge: URLAuthenticationChallenge
+    ) -> Bool {
+        let space = authenticationChallenge.protectionSpace
+        if space.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = space.serverTrust {
+            authenticationChallenge.sender?.use(URLCredential(trust: trust), for: authenticationChallenge)
+        } else {
+            authenticationChallenge.sender?.continueWithoutCredential(for: authenticationChallenge)
+        }
+        return true
+    }
+}
+
 /// Playback engine: manages the queue, lock-screen controls, progress
 /// reporting, history recording, and random autoplay continuation —
 /// mirroring the Android PlaybackService.
@@ -134,7 +155,14 @@ final class PlayerManager: ObservableObject {
         if let old = endObserver {
             NotificationCenter.default.removeObserver(old)
         }
-        let item = AVPlayerItem(url: url)
+        let item: AVPlayerItem
+        if url.isFileURL {
+            item = AVPlayerItem(url: url)
+        } else {
+            let asset = AVURLAsset(url: url)
+            asset.resourceLoader.setDelegate(InsecureAssetLoader.shared, queue: InsecureAssetLoader.queue)
+            item = AVPlayerItem(asset: asset)
+        }
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
@@ -229,7 +257,7 @@ final class PlayerManager: ObservableObject {
         if let artURL = client.imageURL(albumId: song.albumId) {
             let songId = song.id
             Task {
-                guard let (data, _) = try? await URLSession.shared.data(from: artURL),
+                guard let (data, _) = try? await Net.session.data(from: artURL),
                       let image = UIImage(data: data) else { return }
                 guard self.currentSong?.id == songId else { return }
                 let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }

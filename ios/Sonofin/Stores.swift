@@ -215,7 +215,7 @@ final class DownloadManager: ObservableObject {
         Task {
             defer { active.remove(song.id) }
             do {
-                let (temp, response) = try await URLSession.shared.download(from: remote)
+                let (temp, response) = try await Net.session.download(from: remote)
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
                 try? FileManager.default.removeItem(at: destination)
                 try FileManager.default.moveItem(at: temp, to: destination)

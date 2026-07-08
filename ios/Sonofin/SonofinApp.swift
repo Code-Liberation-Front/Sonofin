@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct SonofinApp: App {
@@ -246,15 +247,22 @@ struct SettingsView: View {
 
 // MARK: - Shared cover art view
 
-struct CoverArt: View {
+/// Decoded-image memory cache for cover art.
+enum CoverCache {
+    static let images = NSCache<NSURL, UIImage>()
+}
+
+/// Cover loader that goes through the certificate-tolerant session —
+/// AsyncImage always uses the shared session, which rejects the
+/// self-signed certificates most self-hosted servers run.
+struct RemoteCover: View {
     var url: URL?
-    var size: CGFloat
-    var corner: CGFloat
+    @State private var image: UIImage?
 
     var body: some View {
-        AsyncImage(url: url) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
             } else {
                 ZStack {
                     Rectangle().fill(Color.gray.opacity(0.25))
@@ -262,8 +270,32 @@ struct CoverArt: View {
                 }
             }
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: corner))
+        .task(id: url) {
+            guard let url else {
+                image = nil
+                return
+            }
+            if let hit = CoverCache.images.object(forKey: url as NSURL) {
+                image = hit
+                return
+            }
+            guard let (data, _) = try? await Net.session.data(from: url),
+                  let loaded = UIImage(data: data) else { return }
+            CoverCache.images.setObject(loaded, forKey: url as NSURL)
+            image = loaded
+        }
+    }
+}
+
+struct CoverArt: View {
+    var url: URL?
+    var size: CGFloat
+    var corner: CGFloat
+
+    var body: some View {
+        RemoteCover(url: url)
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: corner))
     }
 }
 
@@ -275,18 +307,7 @@ struct CoverArtFlexible: View {
     var body: some View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
-            .overlay(
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        ZStack {
-                            Rectangle().fill(Color.gray.opacity(0.25))
-                            Image(systemName: "music.note").foregroundColor(.secondary)
-                        }
-                    }
-                }
-            )
+            .overlay(RemoteCover(url: url))
             .clipShape(RoundedRectangle(cornerRadius: corner))
     }
 }

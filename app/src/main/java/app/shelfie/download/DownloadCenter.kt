@@ -71,7 +71,7 @@ class DownloadCenter(
     private val internalDir = File(context.filesDir, "episodes").apply { mkdirs() }
     private val indexFile = File(context.filesDir, "downloads_index.json")
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = OkHttpClient()
+    private val client = app.shelfie.data.InsecureTls.apply(OkHttpClient.Builder()).build()
     private val jobs = ConcurrentHashMap<String, Job>()
 
     @Volatile

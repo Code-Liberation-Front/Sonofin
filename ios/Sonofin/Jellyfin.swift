@@ -1,5 +1,33 @@
 import Foundation
 
+// MARK: - Networking (certificate-tolerant)
+
+/// Self-hosted Jellyfin servers usually run plain HTTP or a self-signed
+/// certificate rather than a CA-signed one, so all requests go through a
+/// session that accepts any server certificate.
+final class InsecureSessionDelegate: NSObject, URLSessionDelegate {
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
+    }
+}
+
+enum Net {
+    static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.urlCache = URLCache(memoryCapacity: 50 * 1024 * 1024, diskCapacity: 200 * 1024 * 1024)
+        return URLSession(configuration: config, delegate: InsecureSessionDelegate(), delegateQueue: nil)
+    }()
+}
+
 // MARK: - Domain models
 
 struct Album: Codable, Identifiable, Hashable {
@@ -147,31 +175,53 @@ final class JellyfinClient: ObservableObject {
         return url
     }
 
+    /// Base URLs to try for what the user typed: https first, then plain
+    /// http when no scheme was given (many self-hosted servers have no SSL).
+    static func serverCandidates(_ input: String) -> [String] {
+        var bare = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        while bare.hasSuffix("/") { bare = String(bare.dropLast()) }
+        if bare.hasPrefix("http://") || bare.hasPrefix("https://") {
+            return [bare]
+        }
+        return ["https://\(bare)", "http://\(bare)"]
+    }
+
     func login(server serverInput: String, username: String, password: String) async throws {
-        let base = Self.normalizeServer(serverInput)
-        guard let url = URL(string: "\(base)/Users/AuthenticateByName") else {
-            throw SonofinError.message("Invalid server URL")
+        var lastError: Error = SonofinError.message("Invalid server URL")
+        for base in Self.serverCandidates(serverInput) {
+            guard let url = URL(string: "\(base)/Users/AuthenticateByName") else { continue }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+            request.setValue(authHeader, forHTTPHeaderField: "X-Emby-Authorization")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["Username": username, "Pw": password])
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await Net.session.data(for: request)
+            } catch {
+                // Connection failed entirely — try the next scheme.
+                lastError = error
+                continue
+            }
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                // The server answered (e.g. wrong password) — don't retry http.
+                throw SonofinError.message("Login failed — check the server URL, username, and password")
+            }
+            let result = try JSONDecoder().decode(JFAuthResult.self, from: data)
+            server = base
+            token = result.AccessToken
+            userId = result.User.Id
+            let defaults = UserDefaults.standard
+            defaults.set(server, forKey: "server")
+            defaults.set(token, forKey: "token")
+            defaults.set(userId, forKey: "userId")
+            defaults.set(result.User.Name ?? username, forKey: "username")
+            await MainActor.run { isLoggedIn = true }
+            return
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
-        request.setValue(authHeader, forHTTPHeaderField: "X-Emby-Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["Username": username, "Pw": password])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw SonofinError.message("Login failed — check the server URL, username, and password")
-        }
-        let result = try JSONDecoder().decode(JFAuthResult.self, from: data)
-        server = base
-        token = result.AccessToken
-        userId = result.User.Id
-        let defaults = UserDefaults.standard
-        defaults.set(server, forKey: "server")
-        defaults.set(token, forKey: "token")
-        defaults.set(userId, forKey: "userId")
-        defaults.set(result.User.Name ?? username, forKey: "username")
-        await MainActor.run { isLoggedIn = true }
+        throw lastError
     }
 
     func logout() {
@@ -204,7 +254,7 @@ final class JellyfinClient: ObservableObject {
         request.setValue(authHeader, forHTTPHeaderField: "Authorization")
         request.setValue(authHeader, forHTTPHeaderField: "X-Emby-Authorization")
         request.timeoutInterval = 30
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Net.session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw SonofinError.message("Server error (\((response as? HTTPURLResponse)?.statusCode ?? 0))")
         }
@@ -219,7 +269,7 @@ final class JellyfinClient: ObservableObject {
         request.setValue(authHeader, forHTTPHeaderField: "Authorization")
         request.setValue(authHeader, forHTTPHeaderField: "X-Emby-Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        _ = try? await URLSession.shared.data(for: request)
+        _ = try? await Net.session.data(for: request)
     }
 
     // MARK: Mapping
