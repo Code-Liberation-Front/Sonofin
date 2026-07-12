@@ -16,11 +16,17 @@ import androidx.media3.cast.SessionAvailabilityListener
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import app.shelfie.R
 import app.shelfie.ShelfieApp
+import app.shelfie.playlist.PlaylistEntry
+import app.shelfie.playlist.PlaylistStore
 import app.shelfie.data.BookTrack
 import app.shelfie.data.LibraryItemExpanded
 import app.shelfie.data.LibraryItemSummary
@@ -60,6 +66,13 @@ private const val MIX_PREFIX = "mixList:"
 private const val MIXSONG_PREFIX = "mixSong:"
 private const val PLSONG_PREFIX = "plSong:"
 private const val DOWNLOADED_PLAYLIST_ID = "__downloaded__"
+
+// Custom now-playing actions (Android Auto and the media notification).
+private const val CMD_TOGGLE_FAVORITE = "app.shelfie.TOGGLE_FAVORITE"
+private const val CMD_SAVE_TO_PLAYLIST = "app.shelfie.SAVE_TO_PLAYLIST"
+
+/** Where the Auto "add to playlist" one-tap action saves songs. */
+private const val AUTO_PLAYLIST_NAME = "Saved from Auto"
 
 // Extras carried on audiobook track items for progress reporting.
 private const val EXTRA_TRACK_START_OFFSET = "app.shelfie.trackStartOffset"
@@ -122,11 +135,13 @@ class PlaybackService : MediaLibraryService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        // No custom layout: the notification and Auto show the default
-        // previous / play-pause / next transport controls.
+        // Exactly two custom actions (favorite, add to playlist) flank the
+        // standard previous / play-pause / next controls, so Auto shows the
+        // play button centered with skip buttons on either side.
         mediaSession = MediaLibrarySession.Builder(this, player, LibraryCallback())
             .setSessionActivity(sessionActivity)
             .build()
+        updateNowPlayingActions()
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -140,6 +155,7 @@ class PlaybackService : MediaLibraryService() {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 maybeExtendQueue()
                 if (player.isPlaying) recordHistory()
+                updateNowPlayingActions()
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -155,6 +171,10 @@ class PlaybackService : MediaLibraryService() {
         })
         serviceScope.launch {
             app.settings.normalizeAudio.collect { enabled -> applyNormalization(enabled) }
+        }
+        // Keep the heart/playlist buttons in sync with changes made on the phone.
+        serviceScope.launch {
+            app.playlist.playlists.collect { updateNowPlayingActions() }
         }
         initCast()
         startProgressSync()
@@ -248,6 +268,49 @@ class PlaybackService : MediaLibraryService() {
         player.release()
         super.onDestroy()
     }
+
+    // region now-playing custom actions (favorite, add to playlist)
+
+    /** The playing song as a playlist entry, or null for books/empty player. */
+    private fun currentEntry(): PlaylistEntry? {
+        val item = activePlayer?.currentMediaItem ?: return null
+        if (!item.mediaId.startsWith(EPISODE_PREFIX)) return null
+        val parts = item.mediaId.split(":", limit = 3)
+        if (parts.size != 3) return null
+        return PlaylistEntry(
+            itemId = parts[1],
+            episodeId = parts[2],
+            title = item.mediaMetadata.title?.toString() ?: "Song",
+            podcastTitle = item.mediaMetadata.albumTitle?.toString()
+                ?: item.mediaMetadata.artist?.toString().orEmpty(),
+        )
+    }
+
+    /** Rebuilds the favorite / add-to-playlist buttons to match the current song. */
+    private fun updateNowPlayingActions() {
+        val session = mediaSession ?: return
+        val entry = currentEntry()
+        val lists = app.playlist.playlists.value
+        val isFavorite = entry != null &&
+            PlaylistStore.isFavorite(lists, entry.itemId, entry.episodeId)
+        val isSaved = entry != null && lists.firstOrNull { it.name == AUTO_PLAYLIST_NAME }
+            ?.entries?.any { it.itemId == entry.itemId && it.episodeId == entry.episodeId } == true
+        val favorite = CommandButton.Builder()
+            .setDisplayName(if (isFavorite) "Remove from Favorites" else "Add to Favorites")
+            .setIconResId(if (isFavorite) R.drawable.ic_auto_favorite_filled else R.drawable.ic_auto_favorite)
+            .setSessionCommand(SessionCommand(CMD_TOGGLE_FAVORITE, Bundle.EMPTY))
+            .setEnabled(entry != null)
+            .build()
+        val addToPlaylist = CommandButton.Builder()
+            .setDisplayName(if (isSaved) "Remove from $AUTO_PLAYLIST_NAME" else "Add to playlist")
+            .setIconResId(if (isSaved) R.drawable.ic_auto_playlist_added else R.drawable.ic_auto_playlist_add)
+            .setSessionCommand(SessionCommand(CMD_SAVE_TO_PLAYLIST, Bundle.EMPTY))
+            .setEnabled(entry != null)
+            .build()
+        session.setCustomLayout(ImmutableList.of(favorite, addToPlaylist))
+    }
+
+    // endregion
 
     /** Adds the playing song to the persistent all-time history. */
     private fun recordHistory() {
@@ -371,6 +434,49 @@ class PlaybackService : MediaLibraryService() {
     // region browse tree / search / item resolution
 
     private inner class LibraryCallback : MediaLibrarySession.Callback {
+
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                .buildUpon()
+                .add(SessionCommand(CMD_TOGGLE_FAVORITE, Bundle.EMPTY))
+                .add(SessionCommand(CMD_SAVE_TO_PLAYLIST, Bundle.EMPTY))
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                CMD_TOGGLE_FAVORITE -> {
+                    currentEntry()?.let { app.playlist.toggleFavorite(it) }
+                    updateNowPlayingActions()
+                }
+
+                CMD_SAVE_TO_PLAYLIST -> {
+                    currentEntry()?.let { entry ->
+                        val playlistId = app.playlist.playlists.value
+                            .firstOrNull { it.name == AUTO_PLAYLIST_NAME }?.id
+                            ?: app.playlist.create(AUTO_PLAYLIST_NAME)
+                        app.playlist.toggleIn(playlistId, entry)
+                    }
+                    updateNowPlayingActions()
+                }
+
+                else -> return Futures.immediateFuture(
+                    SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED),
+                )
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
 
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
