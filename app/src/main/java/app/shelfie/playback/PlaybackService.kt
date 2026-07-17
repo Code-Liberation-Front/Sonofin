@@ -6,8 +6,6 @@ import android.media.audiofx.DynamicsProcessing
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.KeyEvent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -77,11 +75,14 @@ private const val CMD_SAVE_TO_PLAYLIST = "app.shelfie.SAVE_TO_PLAYLIST"
 /** Where the Auto "add to playlist" one-tap action saves songs. */
 private const val AUTO_PLAYLIST_NAME = "Saved from Auto"
 
-// Holding a physical skip button (steering wheel / head unit) this long seeks
-// within the song instead of changing tracks, like YouTube Music.
-private const val SKIP_HOLD_THRESHOLD_MS = 3_000L
+// Holding a physical skip button (steering wheel / head unit) seeks within
+// the song instead of changing tracks, like YouTube Music. Media3 never
+// delivers key-UP events to the session callback, so the hold is detected
+// from the auto-repeat key-DOWN stream: repeats only arrive while the button
+// is physically held, so seeking stops the moment it's released.
 private const val SKIP_HOLD_SEEK_MS = 10_000L
-private const val SKIP_HOLD_REPEAT_MS = 1_000L
+private const val SKIP_HOLD_SEEK_THROTTLE_MS = 1_000L
+private const val SKIP_HOLD_SEQUENCE_WINDOW_MS = 400L
 
 // Extras carried on audiobook track items for progress reporting.
 private const val EXTRA_TRACK_START_OFFSET = "app.shelfie.trackStartOffset"
@@ -293,7 +294,6 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
-        skipKeyHandler.removeCallbacksAndMessages(null)
         serviceScope.cancel()
         runCatching { dynamicsProcessing?.release() }
         dynamicsProcessing = null
@@ -308,45 +308,35 @@ class PlaybackService : MediaLibraryService() {
 
     // region long-press skip buttons (hold to seek within the song)
 
-    private val skipKeyHandler = Handler(Looper.getMainLooper())
-    private var skipKeyDown = false
-    private var skipHoldTriggered = false
-    private var pendingSkipHold: Runnable? = null
+    private var lastSkipKeyCode = 0
+    private var lastSkipKeyAt = 0L
+    private var lastHoldSeekAt = 0L
 
     /**
-     * Physical next/previous buttons (steering wheel, head unit): a short
-     * press changes tracks; holding for [SKIP_HOLD_THRESHOLD_MS] seeks
-     * 10 seconds within the song instead, repeating while held.
+     * Physical next/previous buttons (steering wheel, head unit): a single
+     * press changes tracks immediately; while the button stays held, the
+     * repeated key events it generates seek 10 seconds per second within the
+     * song instead. Seeking is driven purely by incoming events — never by a
+     * timer — so it stops as soon as the button is released.
      */
     private fun handleSkipKey(event: KeyEvent): Boolean {
+        if (event.action != KeyEvent.ACTION_DOWN) return true
         val forward = event.keyCode == KeyEvent.KEYCODE_MEDIA_NEXT
-        when (event.action) {
-            KeyEvent.ACTION_DOWN -> {
-                if (event.repeatCount == 0 && !skipKeyDown) {
-                    skipKeyDown = true
-                    skipHoldTriggered = false
-                    val holdSeek = object : Runnable {
-                        override fun run() {
-                            if (!skipKeyDown) return
-                            skipHoldTriggered = true
-                            seekWithinSong(if (forward) SKIP_HOLD_SEEK_MS else -SKIP_HOLD_SEEK_MS)
-                            skipKeyHandler.postDelayed(this, SKIP_HOLD_REPEAT_MS)
-                        }
-                    }
-                    pendingSkipHold = holdSeek
-                    skipKeyHandler.postDelayed(holdSeek, SKIP_HOLD_THRESHOLD_MS)
-                }
+        val now = android.os.SystemClock.elapsedRealtime()
+        // A framework auto-repeat, or another press of the same key arriving
+        // faster than a human re-tap, means the button is being held.
+        val partOfHold = event.repeatCount > 0 ||
+            (event.keyCode == lastSkipKeyCode && now - lastSkipKeyAt < SKIP_HOLD_SEQUENCE_WINDOW_MS)
+        lastSkipKeyCode = event.keyCode
+        lastSkipKeyAt = now
+        if (partOfHold) {
+            if (now - lastHoldSeekAt >= SKIP_HOLD_SEEK_THROTTLE_MS) {
+                lastHoldSeekAt = now
+                seekWithinSong(if (forward) SKIP_HOLD_SEEK_MS else -SKIP_HOLD_SEEK_MS)
             }
-
-            KeyEvent.ACTION_UP -> {
-                pendingSkipHold?.let { skipKeyHandler.removeCallbacks(it) }
-                pendingSkipHold = null
-                skipKeyDown = false
-                if (!skipHoldTriggered) {
-                    val current = activePlayer ?: return true
-                    if (forward) current.seekToNext() else current.seekToPrevious()
-                }
-            }
+        } else {
+            val current = activePlayer ?: return true
+            if (forward) current.seekToNext() else current.seekToPrevious()
         }
         return true
     }
