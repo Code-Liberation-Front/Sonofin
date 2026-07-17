@@ -251,7 +251,8 @@ private fun MainScaffold(
                     onExpand = onExpandPlayer,
                 )
                 if (showChrome) {
-                    NavigationBar {
+                    // Match the page background instead of M3's elevated gray.
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
                         BOTTOM_TABS.forEach { tab ->
                             NavigationBarItem(
                                 selected = selectedTab == tab.route,
