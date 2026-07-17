@@ -43,8 +43,13 @@ private fun ConnectivityManager.isOnlineNow(): Boolean {
 
 /**
  * Tracks whether the device currently has a validated internet connection.
- * Uses the default-network callback plus a low-frequency poll: callbacks alone
- * can miss transitions (e.g. cellular toggled off while the app is open).
+ *
+ * Going online flips the state immediately; going offline requires two
+ * consecutive confirmed reads. While the app sits frozen in the background
+ * Android revokes its network and queues stale "lost" callbacks that are
+ * delivered on return — trusting them directly flashed the offline screen
+ * even though the network was fine, so callbacks only ever confirm ONLINE
+ * and the offline verdict comes from polling the live state.
  */
 @Composable
 fun rememberIsOnline(): State<Boolean> {
@@ -55,34 +60,34 @@ fun rememberIsOnline(): State<Boolean> {
     }
 
     DisposableEffect(Unit) {
-        online.value = manager.isOnlineNow()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                online.value = manager.isOnlineNow()
-            }
-
-            override fun onLost(network: Network) {
-                online.value = manager.isOnlineNow()
-            }
-
-            override fun onUnavailable() {
-                online.value = false
+                if (manager.isOnlineNow()) online.value = true
             }
 
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                online.value = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                     caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                ) {
+                    online.value = true
+                }
             }
         }
         manager.registerDefaultNetworkCallback(callback)
         onDispose { manager.unregisterNetworkCallback(callback) }
     }
 
-    // Safety net for missed callbacks.
     LaunchedEffect(Unit) {
+        var offlineStreak = 0
         while (true) {
-            delay(3_000)
-            online.value = manager.isOnlineNow()
+            if (manager.isOnlineNow()) {
+                offlineStreak = 0
+                online.value = true
+            } else {
+                offlineStreak++
+                if (offlineStreak >= 2) online.value = false
+            }
+            delay(2_000)
         }
     }
     return online

@@ -187,6 +187,33 @@ class PlaybackService : MediaLibraryService() {
         }
         initCast()
         startProgressSync()
+        serviceScope.launch { restoreLastQueue() }
+    }
+
+    /**
+     * When playback is paused the service isn't foreground, so the system may
+     * kill it while the app sits in the background — losing the queue and
+     * leaving the now-playing bar empty on return. A fresh service restores
+     * the last-played queue, paused at its saved position.
+     */
+    private suspend fun restoreLastQueue() {
+        if (player.mediaItemCount > 0) return
+        val (mediaId, storedPositionMs) = app.settings.lastPlayed() ?: return
+        val resumed = withContext(Dispatchers.IO) {
+            runCatching {
+                if (mediaId.startsWith(TRACK_PREFIX)) {
+                    bookQueueFor(mediaId, storedPositionMs)
+                } else {
+                    podcastQueueFor(mediaId, storedPositionMs)
+                }
+            }.getOrNull()
+        } ?: return
+        if (resumed.mediaItems.isEmpty()) return
+        // A controller may have queued something while we were fetching.
+        if (player.mediaItemCount > 0) return
+        player.setMediaItems(resumed.mediaItems, resumed.startIndex, resumed.startPositionMs)
+        player.playWhenReady = false
+        player.prepare()
     }
 
     /**
